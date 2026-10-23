@@ -1,4 +1,5 @@
 import { Plugin } from "obsidian";
+import { OutlineIntegration } from "./outline";
 import { EmbedHeadingProcessor, findRenderRoot } from "./processor";
 import {
   AutoIncrementedEmbedHeadingsSettingTab,
@@ -9,11 +10,14 @@ import {
 export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
   settings!: PluginSettings;
   private processor!: EmbedHeadingProcessor;
+  private outline!: OutlineIntegration;
 
   async onload(): Promise<void> {
     await this.loadSettings();
 
     this.processor = new EmbedHeadingProcessor(this.app, () => this.settings);
+    this.outline = new OutlineIntegration(this.app, () => this.settings);
+    this.outline.start();
 
     this.registerMarkdownPostProcessor((element) => {
       if (!this.settings.enabled) {
@@ -29,18 +33,37 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
         this.processor.refreshAll();
+        this.outline.onLayoutChange();
       }),
     );
 
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         this.processor.refreshAll();
+        this.outline.refresh();
       }),
     );
 
     this.registerEvent(
       this.app.workspace.on("file-open", () => {
         this.processor.refreshAll();
+        this.outline.refresh();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.metadataCache.on("changed", () => {
+        // Keep the rendered outline keys in sync when the cache catches up
+        // with an edit that added, removed, or reordered embeds.
+        this.processor.refreshAll();
+        this.outline.refresh();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        this.processor.refreshAll();
+        this.outline.refresh();
       }),
     );
 
@@ -64,10 +87,12 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
 
     this.app.workspace.onLayoutReady(() => {
       this.processor.refreshAll();
+      this.outline.onLayoutChange();
     });
   }
 
   onunload(): void {
+    this.outline?.destroy();
     this.processor?.restoreAll();
     this.processor?.destroy();
   }
@@ -87,9 +112,11 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
   refreshHeadingLevels(): void {
     this.processor.restoreAll();
     this.processor.refreshAll();
+    this.outline.refresh();
   }
 
   reapplySettings(): void {
     this.refreshHeadingLevels();
+    this.outline.onSettingsChanged();
   }
 }

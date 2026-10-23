@@ -25,3 +25,27 @@ await esbuild.build({
   entryPoints: ["src/headingSource.ts"],
   outfile: "tests/.tmp/headingSource.cjs",
 });
+
+await esbuild.build({
+  ...common,
+  entryPoints: ["src/embedTargets.ts"],
+  outfile: "tests/.tmp/embedTargets.cjs",
+});
+
+await esbuild.build({
+  ...common,
+  entryPoints: ["src/embedData.ts"],
+  outfile: "tests/.tmp/embedData.cjs",
+});
+
+await esbuild.build({
+  ...common,
+  entryPoints: ["src/outlineHeadings.ts"],
+  outfile: "tests/.tmp/outlineHeadings.cjs",
+});
+
+await esbuild.build({
+  ...common,
+  entryPoints: ["src/outline.ts"],
+  outfile: "tests/.tmp/outline.cjs",
+});

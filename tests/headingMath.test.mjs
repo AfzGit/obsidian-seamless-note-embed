@@ -41,9 +41,10 @@ test("finds the nearest preceding heading", () => {
     { line: 8, level: 3 },
   ];
 
-  assert.equal(nearestPrecedingHeadingLevel(headings, 0), 0);
+  assert.equal(nearestPrecedingHeadingLevel(headings, 0), 1);
   assert.equal(nearestPrecedingHeadingLevel(headings, 1), 1);
   assert.equal(nearestPrecedingHeadingLevel(headings, 5), 2);
+  assert.equal(nearestPrecedingHeadingLevel(headings, 8), 3);
   assert.equal(nearestPrecedingHeadingLevel(headings, 9), 3);
 });
 
@@ -65,7 +66,13 @@ test("parses ATX, setext, fenced, and frontmatter headings", () => {
 
   assert.deepEqual(parseHeadingLines(lines), [
     { line: 3, level: 1 },
-    { line: 6, level: 2 },
+    { line: 5, level: 2 },
     { line: 11, level: 3 },
+  ]);
+
+  // A setext heading starts at the first line of its paragraph, so an embed on
+  // any of those lines sees the heading above it.
+  assert.deepEqual(parseHeadingLines(["Line one", "Line two", "====="]), [
+    { line: 0, level: 1 },
   ]);
 });

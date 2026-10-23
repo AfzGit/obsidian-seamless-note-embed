@@ -1,7 +1,7 @@
 {
   "name": "auto-incremented-embed-headings",
   "version": "0.1.0",
-  "description": "Obsidian plugin that shifts the headings of embedded notes to match the heading they are nested under.",
+  "description": "Obsidian plugin that shifts embedded-note headings and integrates them into the built-in Outline view.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

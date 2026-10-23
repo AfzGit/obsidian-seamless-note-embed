@@ -29,6 +29,115 @@ __export(main_exports, {
 module.exports = __toCommonJS(main_exports);
 var import_obsidian2 = require("obsidian");
 
+// src/embedTargets.ts
+function splitLinktext(link) {
+  const pipe = link.indexOf("|");
+  const withoutAlias = pipe === -1 ? link : link.slice(0, pipe);
+  const hash = withoutAlias.indexOf("#");
+  return hash === -1 ? { path: withoutAlias, subpath: "" } : { path: withoutAlias.slice(0, hash), subpath: withoutAlias.slice(hash) };
+}
+var STRIP_HEADING_PUNCTUATION = /[!"#$%&()*+,.:;<=>?@^`{|}~\/\[\]\\\r\n]/g;
+function normalizeHeading(text) {
+  return text.replace(STRIP_HEADING_PUNCTUATION, " ").replace(/\s+/g, " ").trim().toLowerCase();
+}
+function resolveHeadingSubpath(headings, subpath) {
+  const parts = subpath.split("#").filter((part) => part.length > 0);
+  if (parts.length === 0) {
+    return null;
+  }
+  if (parts[0].startsWith("^") || parts[0].startsWith("[^")) {
+    return null;
+  }
+  let partIndex = 0;
+  let matchedLevel = 0;
+  let matchedIndex = -1;
+  let nextIndex = -1;
+  for (let index = 0; index < headings.length; index++) {
+    const heading = headings[index];
+    if (matchedIndex !== -1 && heading.level <= matchedLevel) {
+      nextIndex = index;
+      break;
+    }
+    if (matchedIndex === -1 && heading.level > matchedLevel && normalizeHeading(heading.heading) === normalizeHeading(parts[partIndex])) {
+      partIndex++;
+      matchedLevel = heading.level;
+      if (partIndex === parts.length) {
+        matchedIndex = index;
+      }
+    }
+  }
+  if (matchedIndex === -1) {
+    return null;
+  }
+  return {
+    startLine: headings[matchedIndex].position.start.line,
+    endLine: nextIndex === -1 ? Number.POSITIVE_INFINITY : headings[nextIndex].position.start.line
+  };
+}
+function findMatchingHeading(headings, startIndex, text, level) {
+  const normalized = normalizeHeading(text);
+  const firstIndex = Math.max(0, startIndex);
+  for (let index = firstIndex; index < headings.length; index++) {
+    const heading = headings[index];
+    if (heading.level === level && normalizeHeading(heading.heading) === normalized) {
+      return { heading, index };
+    }
+  }
+  if (firstIndex < headings.length) {
+    const fallback = headings[firstIndex];
+    if (fallback.level === level) {
+      return { heading: fallback, index: firstIndex };
+    }
+  }
+  return null;
+}
+
+// src/embedData.ts
+function getFileData(app, file) {
+  var _a, _b;
+  if (!file || file.extension !== "md") {
+    return null;
+  }
+  const cache = app.metadataCache.getFileCache(file);
+  if (!cache) {
+    return null;
+  }
+  return {
+    file,
+    path: file.path,
+    headings: (_a = cache.headings) != null ? _a : [],
+    embeds: (_b = cache.embeds) != null ? _b : []
+  };
+}
+function resolveEmbedData(app, link, sourcePath) {
+  const { path, subpath } = splitLinktext(link);
+  const file = app.metadataCache.getFirstLinkpathDest(path, sourcePath);
+  if (!file) {
+    return null;
+  }
+  const data = getFileData(app, file);
+  return data ? { data, subpath } : null;
+}
+function filterSection(data, subpath) {
+  if (!subpath) {
+    return { headings: data.headings, embeds: data.embeds };
+  }
+  const range = resolveHeadingSubpath(data.headings, subpath);
+  if (!range) {
+    return { headings: [], embeds: [] };
+  }
+  return {
+    headings: data.headings.filter((heading) => {
+      const line = heading.position.start.line;
+      return line >= range.startLine && line < range.endLine;
+    }),
+    embeds: data.embeds.filter((embed) => {
+      const line = embed.position.start.line;
+      return line >= range.startLine && line < range.endLine;
+    })
+  };
+}
+
 // src/headingMath.ts
 var MIN_HEADING_LEVEL = 1;
 var MAX_HEADING_LEVEL = 6;
@@ -56,11 +165,581 @@ function headingLevelFromText(text) {
   return match ? match[1].length : null;
 }
 
+// src/outlineKeys.ts
+var OUTLINE_KEY_ATTRIBUTE = "data-aeih-outline-key";
+function makeOutlineKey(parts) {
+  return JSON.stringify([parts.rootPath, parts.embedPath, parts.targetPath, parts.targetLine]);
+}
+
+// src/outlineHeadings.ts
+function mergeEvents(headings, embeds) {
+  const sortedHeadings = [...headings].sort(
+    (left, right) => left.position.start.line - right.position.start.line || left.position.start.col - right.position.start.col
+  );
+  const sortedEmbeds = [...embeds].sort(
+    (left, right) => left.position.start.line - right.position.start.line || left.position.start.col - right.position.start.col
+  );
+  const events = [
+    ...sortedHeadings.map((heading) => ({
+      kind: "heading",
+      line: heading.position.start.line,
+      heading
+    })),
+    ...sortedEmbeds.map((embed) => ({
+      kind: "embed",
+      line: embed.position.start.line,
+      embed
+    }))
+  ];
+  events.sort((left, right) => {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    if (left.line !== right.line) {
+      return left.line - right.line;
+    }
+    if (left.kind !== right.kind) {
+      return left.kind === "heading" ? -1 : 1;
+    }
+    const leftCol = left.kind === "heading" ? (_b = (_a = left.heading) == null ? void 0 : _a.position.start.col) != null ? _b : 0 : (_d = (_c = left.embed) == null ? void 0 : _c.position.start.col) != null ? _d : 0;
+    const rightCol = right.kind === "heading" ? (_f = (_e = right.heading) == null ? void 0 : _e.position.start.col) != null ? _f : 0 : (_h = (_g = right.embed) == null ? void 0 : _g.position.start.col) != null ? _h : 0;
+    return leftCol - rightCol;
+  });
+  return events;
+}
+function makeChainKey(path, subpath) {
+  return JSON.stringify([path, subpath]);
+}
+function buildOutlineHeadings(root, resolveFile) {
+  const output = [];
+  let currentLevel = 0;
+  let noteEmbedIndex = 0;
+  for (const event of mergeEvents(root.headings, root.embeds)) {
+    if (event.kind === "heading" && event.heading) {
+      output.push(event.heading);
+      currentLevel = event.heading.level;
+      continue;
+    }
+    if (event.kind === "embed" && event.embed) {
+      const counted = appendEmbeddedHeadings({
+        embed: event.embed,
+        sourcePath: root.path,
+        parentLevel: currentLevel,
+        rootEmbedLine: event.line,
+        embedPath: [noteEmbedIndex],
+        chain: [makeChainKey(root.path, "")],
+        rootPath: root.path,
+        output,
+        resolveFile
+      });
+      if (counted) {
+        noteEmbedIndex += 1;
+      }
+    }
+  }
+  return output;
+}
+function appendEmbeddedHeadings(options) {
+  const {
+    embed,
+    sourcePath,
+    parentLevel,
+    rootEmbedLine,
+    embedPath,
+    chain,
+    rootPath,
+    output,
+    resolveFile
+  } = options;
+  const { path, subpath } = splitLinktext(embed.link);
+  const target = resolveFile(path, sourcePath);
+  if (!target) {
+    return false;
+  }
+  const chainKey = makeChainKey(target.path, subpath);
+  if (chain.includes(chainKey)) {
+    return true;
+  }
+  const section = filterSection(target, subpath);
+  if (!section) {
+    return true;
+  }
+  let currentLevel = parentLevel;
+  let nestedEmbedIndex = 0;
+  for (const event of mergeEvents(section.headings, section.embeds)) {
+    if (event.kind === "heading" && event.heading) {
+      const original = event.heading;
+      const level = shiftHeadingLevel(original.level, parentLevel);
+      const meta = {
+        key: makeOutlineKey({
+          rootPath,
+          embedPath,
+          targetPath: target.path,
+          targetLine: original.position.start.line
+        }),
+        rootPath,
+        embedPath: [...embedPath],
+        targetPath: target.path,
+        targetLine: original.position.start.line,
+        originalLevel: original.level,
+        embedLine: rootEmbedLine
+      };
+      output.push({
+        heading: original.heading,
+        level,
+        position: {
+          // Clicking uses the start line, so navigate to the top-level embed.
+          start: { line: rootEmbedLine, col: 0, offset: 0 },
+          // The core outline's preview-mode "active heading" check uses the
+          // end line. A fake heading must never win that check; the real
+          // parent heading above the embed should stay highlighted instead.
+          end: { line: Number.MAX_SAFE_INTEGER, col: 0, offset: 0 }
+        },
+        aeih: meta
+      });
+      currentLevel = level;
+      continue;
+    }
+    if (event.kind === "embed" && event.embed) {
+      const counted = appendEmbeddedHeadings({
+        embed: event.embed,
+        sourcePath: target.path,
+        parentLevel: currentLevel,
+        rootEmbedLine,
+        embedPath: [...embedPath, nestedEmbedIndex],
+        chain: [...chain, chainKey],
+        rootPath,
+        output,
+        resolveFile
+      });
+      if (counted) {
+        nestedEmbedIndex += 1;
+      }
+    }
+  }
+  return true;
+}
+
+// src/outline.ts
+function decorateItem(item) {
+  if (!(item == null ? void 0 : item.selfEl)) {
+    return;
+  }
+  const heading = item.heading;
+  const meta = heading == null ? void 0 : heading.aeih;
+  if (meta) {
+    item.selfEl.setAttribute(OUTLINE_KEY_ATTRIBUTE, meta.key);
+    item.selfEl.classList.add("aeih-outline-embedded");
+    return;
+  }
+  item.selfEl.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+  item.selfEl.classList.remove("aeih-outline-embedded");
+}
+function decorateView(view) {
+  const items = view.cachedHeadingDom;
+  if (!Array.isArray(items)) {
+    return;
+  }
+  for (const item of items) {
+    decorateItem(item);
+  }
+}
+function undecorateView(view) {
+  const items = view.cachedHeadingDom;
+  if (!Array.isArray(items)) {
+    return;
+  }
+  for (const item of items) {
+    if (!(item == null ? void 0 : item.selfEl)) {
+      continue;
+    }
+    item.selfEl.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+    item.selfEl.classList.remove("aeih-outline-embedded");
+  }
+}
+var OutlineIntegration = class {
+  constructor(app, getSettings) {
+    this.app = app;
+    this.getSettings = getSettings;
+    this.patches = /* @__PURE__ */ new Map();
+    this.refreshFrame = null;
+    this.scrollToken = 0;
+    this.active = false;
+    this.destroyed = false;
+  }
+  start() {
+    if (this.destroyed || !this.getSettings().enabled) {
+      return;
+    }
+    this.active = true;
+    this.patchAll();
+    this.refresh();
+  }
+  stop() {
+    var _a;
+    this.active = false;
+    this.scrollToken += 1;
+    if (this.refreshFrame !== null) {
+      window.cancelAnimationFrame(this.refreshFrame);
+      this.refreshFrame = null;
+    }
+    const views = Array.from(this.patches.keys());
+    for (const [view, state] of this.patches) {
+      this.restoreView(view, state);
+    }
+    this.patches.clear();
+    for (const view of views) {
+      try {
+        (_a = view.update) == null ? void 0 : _a.call(view);
+      } catch (error) {
+        console.error("Auto-Incremented Embed Headings: failed to refresh the outline", error);
+      }
+    }
+  }
+  destroy() {
+    this.stop();
+    this.destroyed = true;
+  }
+  onLayoutChange() {
+    if (!this.active || !this.getSettings().enabled) {
+      return;
+    }
+    this.patchAll();
+    this.refresh();
+  }
+  onSettingsChanged() {
+    if (!this.getSettings().enabled) {
+      this.stop();
+      return;
+    }
+    if (!this.active) {
+      this.start();
+    } else {
+      this.refresh();
+    }
+  }
+  /** Rebuild the outline after metadata or embedded-note changes. */
+  refresh() {
+    if (!this.active || !this.getSettings().enabled) {
+      return;
+    }
+    this.patchAll();
+    if (this.refreshFrame !== null) {
+      return;
+    }
+    this.refreshFrame = window.requestAnimationFrame(() => {
+      var _a;
+      this.refreshFrame = null;
+      if (!this.active) {
+        return;
+      }
+      for (const view of Array.from(this.patches.keys())) {
+        try {
+          (_a = view.update) == null ? void 0 : _a.call(view);
+        } catch (error) {
+          console.error("Auto-Incremented Embed Headings: failed to refresh the outline", error);
+        }
+      }
+    });
+  }
+  patchAll() {
+    if (!this.active || !this.getSettings().enabled) {
+      return;
+    }
+    this.pruneDetachedViews();
+    const workspace = this.app.workspace;
+    if (!workspace || typeof workspace.getLeavesOfType !== "function") {
+      return;
+    }
+    let leaves;
+    try {
+      leaves = workspace.getLeavesOfType("outline");
+    } catch (e) {
+      return;
+    }
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (!view || !view.containerEl || typeof view.getHeadings !== "function" || typeof view.update !== "function" || this.patches.has(view)) {
+        continue;
+      }
+      if (this.patchView(view)) {
+        try {
+          view.update();
+        } catch (error) {
+          console.error(
+            "Auto-Incremented Embed Headings: failed to refresh the outline",
+            error
+          );
+        }
+      }
+    }
+  }
+  pruneDetachedViews() {
+    var _a;
+    for (const [view, state] of Array.from(this.patches)) {
+      if ((_a = view.containerEl) == null ? void 0 : _a.isConnected) {
+        continue;
+      }
+      this.restoreView(view, state);
+      this.patches.delete(view);
+    }
+  }
+  patchView(view) {
+    const ownGetHeadings = view.getHeadings;
+    const ownUpdate = view.update;
+    if (typeof ownGetHeadings !== "function" || typeof ownUpdate !== "function") {
+      return false;
+    }
+    const hadOwnGetHeadings = Object.prototype.hasOwnProperty.call(view, "getHeadings");
+    const hadOwnUpdate = Object.prototype.hasOwnProperty.call(view, "update");
+    const hadOwnCreateItemDom = Object.prototype.hasOwnProperty.call(view, "createItemDom");
+    const hadOwnFindActiveHeading = Object.prototype.hasOwnProperty.call(
+      view,
+      "findActiveHeading"
+    );
+    const boundGetHeadings = ownGetHeadings.bind(view);
+    const boundUpdate = ownUpdate.bind(view);
+    const ownCreateItemDom = view.createItemDom;
+    const boundCreateItemDom = typeof ownCreateItemDom === "function" ? ownCreateItemDom.bind(view) : null;
+    const ownFindActiveHeading = view.findActiveHeading;
+    const boundFindActiveHeading = typeof ownFindActiveHeading === "function" ? ownFindActiveHeading.bind(view) : null;
+    const metaByKey = /* @__PURE__ */ new Map();
+    const getHeadings = () => {
+      let fallback = [];
+      try {
+        const original = boundGetHeadings();
+        if (Array.isArray(original)) {
+          fallback = original;
+        }
+      } catch (error) {
+        console.error(
+          "Auto-Incremented Embed Headings: the core outline could not read its headings",
+          error
+        );
+      }
+      metaByKey.clear();
+      if (!this.active || !this.getSettings().enabled) {
+        return fallback;
+      }
+      const file = view.file;
+      if (!file || file.extension !== "md") {
+        return fallback;
+      }
+      try {
+        const fileData = getFileData(this.app, file);
+        if (!fileData) {
+          return fallback;
+        }
+        const combined = buildOutlineHeadings(fileData, (path, sourcePath) => {
+          try {
+            const targetFile = this.app.metadataCache.getFirstLinkpathDest(path, sourcePath);
+            return targetFile ? getFileData(this.app, targetFile) : null;
+          } catch (error) {
+            console.error(
+              "Auto-Incremented Embed Headings: failed to resolve an embed for the outline",
+              error
+            );
+            return null;
+          }
+        });
+        for (const heading of combined) {
+          if (heading.aeih) {
+            metaByKey.set(heading.aeih.key, heading.aeih);
+          }
+        }
+        return combined;
+      } catch (error) {
+        console.error(
+          "Auto-Incremented Embed Headings: failed to build the outline",
+          error
+        );
+        return fallback;
+      }
+    };
+    const update = () => {
+      const result = boundUpdate();
+      if (result && typeof result.then === "function") {
+        return Promise.resolve(result).then(() => decorateView(view));
+      }
+      decorateView(view);
+      return result;
+    };
+    const createItemDom = boundCreateItemDom === null ? null : (heading) => {
+      const item = boundCreateItemDom(heading);
+      decorateItem(item);
+      return item;
+    };
+    const findActiveHeading = boundFindActiveHeading === null ? null : (markdownView) => {
+      const active = boundFindActiveHeading(markdownView);
+      const heading = active == null ? void 0 : active.heading;
+      return (heading == null ? void 0 : heading.aeih) ? null : active;
+    };
+    const findOutlineItem = (target) => {
+      const element = target;
+      if (!element || typeof element.closest !== "function") {
+        return null;
+      }
+      const item = element.closest(`[${OUTLINE_KEY_ATTRIBUTE}]`);
+      return item && view.containerEl.contains(item) ? item : null;
+    };
+    const clickHandler = (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        return;
+      }
+      this.scrollToken += 1;
+      const element = event.target;
+      if (!element || typeof element.closest !== "function") {
+        return;
+      }
+      if (element.closest(".collapse-icon, .tree-item-icon")) {
+        return;
+      }
+      const item = findOutlineItem(element);
+      if (!item) {
+        return;
+      }
+      const key = item.getAttribute(OUTLINE_KEY_ATTRIBUTE);
+      const meta = key ? metaByKey.get(key) : void 0;
+      if (!meta) {
+        return;
+      }
+      this.scheduleScrollToHeading(view, meta);
+    };
+    const mouseOverHandler = (event) => {
+      if (findOutlineItem(event.target)) {
+        event.stopImmediatePropagation();
+      }
+    };
+    const dragStartHandler = (event) => {
+      if (findOutlineItem(event.target)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }
+    };
+    Reflect.set(view, "getHeadings", getHeadings);
+    Reflect.set(view, "update", update);
+    if (createItemDom) {
+      Reflect.set(view, "createItemDom", createItemDom);
+    }
+    if (findActiveHeading) {
+      Reflect.set(view, "findActiveHeading", findActiveHeading);
+    }
+    view.containerEl.addEventListener("click", clickHandler, true);
+    view.containerEl.addEventListener("mouseover", mouseOverHandler, true);
+    view.containerEl.addEventListener("dragstart", dragStartHandler, true);
+    this.patches.set(view, {
+      hadOwnGetHeadings,
+      originalOwnGetHeadings: ownGetHeadings,
+      hadOwnUpdate,
+      originalOwnUpdate: ownUpdate,
+      hadOwnCreateItemDom,
+      originalOwnCreateItemDom: ownCreateItemDom,
+      hadOwnFindActiveHeading,
+      originalOwnFindActiveHeading: ownFindActiveHeading,
+      clickHandler,
+      mouseOverHandler,
+      dragStartHandler
+    });
+    return true;
+  }
+  restoreView(view, state) {
+    undecorateView(view);
+    if (view.containerEl) {
+      view.containerEl.removeEventListener("click", state.clickHandler, true);
+      view.containerEl.removeEventListener("mouseover", state.mouseOverHandler, true);
+      view.containerEl.removeEventListener("dragstart", state.dragStartHandler, true);
+    }
+    this.restoreProperty(
+      view,
+      "getHeadings",
+      state.hadOwnGetHeadings,
+      state.originalOwnGetHeadings
+    );
+    this.restoreProperty(view, "update", state.hadOwnUpdate, state.originalOwnUpdate);
+    this.restoreProperty(
+      view,
+      "createItemDom",
+      state.hadOwnCreateItemDom,
+      state.originalOwnCreateItemDom
+    );
+    this.restoreProperty(
+      view,
+      "findActiveHeading",
+      state.hadOwnFindActiveHeading,
+      state.originalOwnFindActiveHeading
+    );
+  }
+  restoreProperty(target, key, hadOwn, original) {
+    if (hadOwn) {
+      Reflect.set(target, key, original);
+    } else {
+      Reflect.deleteProperty(target, key);
+    }
+  }
+  scheduleScrollToHeading(view, meta) {
+    const file = view.file;
+    if (!file) {
+      return;
+    }
+    const token = ++this.scrollToken;
+    let attempts = 0;
+    const tryScroll = () => {
+      if (!this.active || token !== this.scrollToken) {
+        return;
+      }
+      const markdownView = this.findMarkdownViewForFile(file);
+      const contentEl = markdownView == null ? void 0 : markdownView.contentEl;
+      if (contentEl) {
+        const heading = this.findHeadingElement(contentEl, meta.key);
+        if (heading) {
+          heading.scrollIntoView({ block: "center", behavior: "smooth" });
+          return;
+        }
+      }
+      if (attempts++ < 40) {
+        window.setTimeout(tryScroll, 50);
+      }
+    };
+    window.setTimeout(tryScroll, 0);
+  }
+  findMarkdownViewForFile(file) {
+    var _a;
+    const activeView = (_a = this.app.workspace.activeLeaf) == null ? void 0 : _a.view;
+    if (activeView && this.isMarkdownViewForFile(activeView, file)) {
+      return activeView;
+    }
+    let match = null;
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      if (match) {
+        return;
+      }
+      const view = leaf.view;
+      if (this.isMarkdownViewForFile(view, file)) {
+        match = view;
+      }
+    });
+    return match;
+  }
+  isMarkdownViewForFile(view, file) {
+    var _a, _b;
+    return !!view && ((_a = view.getViewType) == null ? void 0 : _a.call(view)) === "markdown" && ((_b = view.file) == null ? void 0 : _b.path) === file.path;
+  }
+  findHeadingElement(container, key) {
+    const elements = container.querySelectorAll(
+      `[${OUTLINE_KEY_ATTRIBUTE}]`
+    );
+    for (const element of Array.from(elements)) {
+      if (element.getAttribute(OUTLINE_KEY_ATTRIBUTE) === key) {
+        return element;
+      }
+    }
+    return null;
+  }
+};
+
 // src/headingSource.ts
 function nearestPrecedingHeadingLevel(headings, line) {
   let level = 0;
   for (const heading of headings) {
-    if (heading.line >= line) {
+    if (heading.line > line) {
       break;
     }
     level = heading.level;
@@ -72,11 +751,13 @@ function parseHeadingLines(lines) {
   let fenceMarker = null;
   let inFrontmatter = false;
   let previousLineIsParagraph = false;
+  let paragraphStart = null;
   for (let index = 0; index < lines.length; index++) {
     const line = index === 0 ? lines[index].replace(/^\uFEFF/, "") : lines[index];
     if (index === 0 && /^---[ \t]*$/.test(line)) {
       inFrontmatter = true;
       previousLineIsParagraph = false;
+      paragraphStart = null;
       continue;
     }
     if (inFrontmatter) {
@@ -94,6 +775,7 @@ function parseHeadingLines(lines) {
         fenceMarker = null;
       }
       previousLineIsParagraph = false;
+      paragraphStart = null;
       continue;
     }
     if (fenceMarker !== null) {
@@ -103,15 +785,26 @@ function parseHeadingLines(lines) {
     if (atx) {
       headings.push({ line: index, level: atx[1].length });
       previousLineIsParagraph = false;
+      paragraphStart = null;
       continue;
     }
     const setext = /^ {0,3}(=+|-+)[ \t]*$/.exec(line);
     if (setext && previousLineIsParagraph) {
-      headings.push({ line: index, level: setext[1][0] === "=" ? 1 : 2 });
+      headings.push({
+        line: paragraphStart != null ? paragraphStart : index,
+        level: setext[1][0] === "=" ? 1 : 2
+      });
       previousLineIsParagraph = false;
+      paragraphStart = null;
       continue;
     }
-    previousLineIsParagraph = line.trim().length > 0;
+    const isParagraph = line.trim().length > 0;
+    if (isParagraph && !previousLineIsParagraph) {
+      paragraphStart = index;
+    } else if (!isParagraph) {
+      paragraphStart = null;
+    }
+    previousLineIsParagraph = isParagraph;
   }
   return headings;
 }
@@ -149,7 +842,7 @@ function findRenderRoot(element) {
     return preview;
   }
   const codeMirrorRoot = element.closest(CM_ROOT_SELECTOR);
-  if (codeMirrorRoot) {
+  if (codeMirrorRoot && !codeMirrorRoot.closest(EMBED_CONTENT_SELECTOR)) {
     return codeMirrorRoot;
   }
   const rendered = outermostWithClass(element, "markdown-rendered");
@@ -288,7 +981,17 @@ var EmbedHeadingProcessor = class {
     this.observers.clear();
   }
   processReadingView(root) {
-    this.processScope(root, 0);
+    var _a, _b;
+    const view = this.findMarkdownView(root);
+    const rootPath = (_b = (_a = view == null ? void 0 : view.file) == null ? void 0 : _a.path) != null ? _b : null;
+    this.processScope(root, 0, {
+      isRoot: true,
+      rootPath,
+      sourcePath: rootPath,
+      embedPath: [],
+      headings: null,
+      cursor: { value: 0 }
+    });
   }
   /**
    * Process one heading scope. `parentLevel` is the absolute heading level of
@@ -296,20 +999,25 @@ var EmbedHeadingProcessor = class {
    * that amount, and any embeds nested inside this scope inherit the last
    * shifted heading level seen.
    */
-  processScope(scope, parentLevel) {
+  processScope(scope, parentLevel, context) {
     let currentLevel = parentLevel;
+    let embedIndex = 0;
     const visit = (node) => {
       if (isMarkdownEmbed(node)) {
-        this.processEmbed(node, currentLevel);
+        const counted = this.processEmbed(node, currentLevel, context, embedIndex);
+        if (counted) {
+          embedIndex += 1;
+        }
         return;
       }
       const tagLevel = headingLevelFromTagName(node.tagName);
       if (tagLevel !== null) {
         const storedLevel = this.readStoredLevel(node);
         const originalLevel = storedLevel != null ? storedLevel : tagLevel;
-        if (parentLevel === 0) {
+        let container = node;
+        if (context.isRoot) {
           if (storedLevel !== null) {
-            this.restoreHeading(node);
+            container = this.restoreHeading(node);
           }
           currentLevel = originalLevel;
         } else {
@@ -317,8 +1025,14 @@ var EmbedHeadingProcessor = class {
             node.setAttribute(ORIGINAL_LEVEL_ATTRIBUTE, String(originalLevel));
           }
           const effectiveLevel = shiftHeadingLevel(originalLevel, parentLevel);
-          this.applyHeadingLevel(node, effectiveLevel, originalLevel);
+          container = this.applyHeadingLevel(node, effectiveLevel, originalLevel);
           currentLevel = effectiveLevel;
+          this.assignOutlineKey(container, originalLevel, context);
+        }
+        for (const child of Array.from(container.children)) {
+          if (isElement(child)) {
+            visit(child);
+          }
         }
         return;
       }
@@ -334,24 +1048,98 @@ var EmbedHeadingProcessor = class {
       }
     }
   }
-  processEmbed(embed, parentLevel) {
+  processEmbed(embed, parentLevel, parentContext, embedIndex) {
     var _a;
     embed.setAttribute(SHIFT_ATTRIBUTE, String(parentLevel));
+    let sourcePath = parentContext.sourcePath;
+    let headings = null;
+    let counted = false;
+    const src = embed.getAttribute("src");
+    if (src && sourcePath && this.app.metadataCache) {
+      try {
+        const resolved = resolveEmbedData(this.app, src, sourcePath);
+        if (resolved) {
+          counted = true;
+          const section = filterSection(resolved.data, resolved.subpath);
+          sourcePath = resolved.data.path;
+          headings = section ? section.headings : [];
+        }
+      } catch (error) {
+        console.error(
+          "Auto-Incremented Embed Headings: failed to resolve an embedded note",
+          error
+        );
+      }
+    }
     const content = (_a = directEmbedContent(embed)) != null ? _a : embed;
-    this.processScope(content, parentLevel);
+    this.processScope(content, parentLevel, {
+      isRoot: false,
+      rootPath: parentContext.rootPath,
+      sourcePath,
+      embedPath: [...parentContext.embedPath, embedIndex],
+      headings,
+      cursor: { value: 0 }
+    });
+    return counted;
+  }
+  assignOutlineKey(heading, originalLevel, context) {
+    var _a, _b;
+    if (context.isRoot || !context.rootPath || !context.sourcePath || !context.headings || context.headings.length === 0) {
+      heading.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+      return;
+    }
+    const text = (_b = (_a = heading.getAttribute("data-heading")) != null ? _a : heading.textContent) != null ? _b : "";
+    const match = findMatchingHeading(
+      context.headings,
+      context.cursor.value,
+      text,
+      originalLevel
+    );
+    if (!match) {
+      heading.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+      return;
+    }
+    heading.setAttribute(
+      OUTLINE_KEY_ATTRIBUTE,
+      makeOutlineKey({
+        rootPath: context.rootPath,
+        embedPath: context.embedPath,
+        targetPath: context.sourcePath,
+        targetLine: match.heading.position.start.line
+      })
+    );
+    context.cursor.value = match.index + 1;
   }
   processLivePreview(root) {
-    const editorShifts = this.getLivePreviewShifts(root);
+    var _a, _b;
+    const embedInfo = this.getLivePreviewEmbedInfo(root);
+    const view = this.findMarkdownView(root);
+    const rootPath = (_b = (_a = view == null ? void 0 : view.file) == null ? void 0 : _a.path) != null ? _b : null;
+    const context = {
+      isRoot: true,
+      rootPath,
+      sourcePath: rootPath,
+      embedPath: [],
+      headings: null,
+      cursor: { value: 0 }
+    };
     let currentLevel = 0;
+    let fallbackEmbedIndex = -1;
     const visit = (node) => {
-      var _a, _b;
+      var _a2, _b2;
       if (isMarkdownEmbed(node)) {
-        this.processEmbed(node, (_a = editorShifts.get(node)) != null ? _a : currentLevel);
+        const info = embedInfo.get(node);
+        let index = info == null ? void 0 : info.index;
+        if (index === void 0) {
+          index = fallbackEmbedIndex;
+          fallbackEmbedIndex -= 1;
+        }
+        this.processEmbed(node, (_a2 = info == null ? void 0 : info.level) != null ? _a2 : currentLevel, context, index);
         return;
       }
       let lineLevel = headingLevelFromClasses(node.classList);
       if (lineLevel === null && node.classList.contains("cm-line") && !node.classList.contains("HyperMD-codeblock")) {
-        lineLevel = headingLevelFromText((_b = node.textContent) != null ? _b : "");
+        lineLevel = headingLevelFromText((_b2 = node.textContent) != null ? _b2 : "");
       }
       if (lineLevel !== null) {
         currentLevel = lineLevel;
@@ -375,38 +1163,90 @@ var EmbedHeadingProcessor = class {
   }
   /**
    * In Live Preview the outer headings are CodeMirror lines, not `<h1>` tags,
-   * and CodeMirror virtualizes long notes. Read the heading positions from the
+   * and CodeMirror virtualizes long notes. Read heading positions from the
    * editor's current source instead, then map each rendered embed back to its
-   * source line.
+   * source line. The returned index comes from the note's metadata cache, so it
+   * still matches the outline when earlier embeds are scrolled out of view.
    */
-  getLivePreviewShifts(root) {
-    const shifts = /* @__PURE__ */ new Map();
+  getLivePreviewEmbedInfo(root) {
+    const info = /* @__PURE__ */ new Map();
     const view = this.findMarkdownView(root);
     if (!view) {
-      return shifts;
+      return info;
     }
     const editorView = view.editor.cm;
     if (!editorView) {
-      return shifts;
+      return info;
     }
     let headings;
     try {
       headings = parseHeadingLines(view.editor.getValue().split(/\r?\n/));
     } catch (e) {
-      return shifts;
+      return info;
     }
+    let rootEmbeds = [];
+    const rootFile = view.file;
+    if (rootFile && this.app.metadataCache) {
+      try {
+        const fileData = getFileData(this.app, rootFile);
+        if (fileData) {
+          const noteEmbeds = [];
+          for (const embed of fileData.embeds) {
+            try {
+              if (!resolveEmbedData(this.app, embed.link, rootFile.path)) {
+                continue;
+              }
+            } catch (e) {
+              continue;
+            }
+            noteEmbeds.push(embed);
+          }
+          rootEmbeds = noteEmbeds.sort(
+            (left, right) => left.position.start.line - right.position.start.line || left.position.start.col - right.position.start.col
+          ).map((embed) => ({
+            line: embed.position.start.line,
+            col: embed.position.start.col
+          }));
+        }
+      } catch (e) {
+        rootEmbeds = [];
+      }
+    }
+    let fallbackIndex = -1;
     for (const embed of Array.from(root.querySelectorAll(EMBED_SELECTOR))) {
       if (embed.closest(EMBED_CONTENT_SELECTOR)) {
         continue;
       }
       try {
         const offset = editorView.posAtDOM(embed);
-        const line = editorView.state.doc.lineAt(offset).number - 1;
-        shifts.set(embed, nearestPrecedingHeadingLevel(headings, line));
+        const lineInfo = editorView.state.doc.lineAt(offset);
+        const line = lineInfo.number - 1;
+        const col = typeof lineInfo.from === "number" ? offset - lineInfo.from : null;
+        let index = -1;
+        let bestDistance = Number.POSITIVE_INFINITY;
+        for (let candidateIndex = 0; candidateIndex < rootEmbeds.length; candidateIndex++) {
+          const candidate = rootEmbeds[candidateIndex];
+          if (candidate.line !== line) {
+            continue;
+          }
+          const distance = col === null ? 0 : Math.abs(candidate.col - col);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            index = candidateIndex;
+          }
+        }
+        if (index === -1) {
+          index = fallbackIndex;
+          fallbackIndex -= 1;
+        }
+        info.set(embed, {
+          level: nearestPrecedingHeadingLevel(headings, line),
+          index
+        });
       } catch (e) {
       }
     }
-    return shifts;
+    return info;
   }
   findMarkdownView(element) {
     let match = null;
@@ -435,6 +1275,7 @@ var EmbedHeadingProcessor = class {
   applyHeadingLevel(heading, level, originalLevel) {
     const replacement = this.replaceHeading(heading, level);
     replacement.setAttribute(SHIFT_ATTRIBUTE, String(level - originalLevel));
+    return replacement;
   }
   /**
    * Changing an element's tag requires creating a new element. All attributes
@@ -472,6 +1313,7 @@ var EmbedHeadingProcessor = class {
         this.restoreHeading(element);
       } else {
         element.removeAttribute(SHIFT_ATTRIBUTE);
+        element.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
       }
     }
   }
@@ -481,6 +1323,8 @@ var EmbedHeadingProcessor = class {
     const restored = Number.isInteger(original) && original >= 1 && original <= 6 ? this.replaceHeading(heading, original) : heading;
     restored.removeAttribute(ORIGINAL_LEVEL_ATTRIBUTE);
     restored.removeAttribute(SHIFT_ATTRIBUTE);
+    restored.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+    return restored;
   }
   ensureObserver(root) {
     if (this.observers.has(root)) {
@@ -502,14 +1346,24 @@ var EmbedHeadingProcessor = class {
     if (record.type !== "childList") {
       return false;
     }
-    for (const added of Array.from(record.addedNodes)) {
-      if (!isElement(added)) {
-        continue;
+    const containsRelevantElement = (node) => {
+      if (!isElement(node)) {
+        return false;
       }
-      if (added.matches(HEADING_SELECTOR) || added.matches(EMBED_SELECTOR) || added.matches(EMBED_CONTENT_SELECTOR)) {
+      if (node.matches(HEADING_SELECTOR) || node.matches(EMBED_SELECTOR) || node.matches(EMBED_CONTENT_SELECTOR)) {
         return true;
       }
-      if (added.querySelector(`${HEADING_SELECTOR}, ${EMBED_SELECTOR}, ${EMBED_CONTENT_SELECTOR}`)) {
+      return !!node.querySelector(
+        `${HEADING_SELECTOR}, ${EMBED_SELECTOR}, ${EMBED_CONTENT_SELECTOR}`
+      );
+    };
+    for (const node of Array.from(record.addedNodes)) {
+      if (containsRelevantElement(node)) {
+        return true;
+      }
+    }
+    for (const node of Array.from(record.removedNodes)) {
+      if (containsRelevantElement(node)) {
         return true;
       }
     }
@@ -589,6 +1443,8 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
   async onload() {
     await this.loadSettings();
     this.processor = new EmbedHeadingProcessor(this.app, () => this.settings);
+    this.outline = new OutlineIntegration(this.app, () => this.settings);
+    this.outline.start();
     this.registerMarkdownPostProcessor((element) => {
       if (!this.settings.enabled) {
         return;
@@ -601,16 +1457,31 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
         this.processor.refreshAll();
+        this.outline.onLayoutChange();
       })
     );
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         this.processor.refreshAll();
+        this.outline.refresh();
       })
     );
     this.registerEvent(
       this.app.workspace.on("file-open", () => {
         this.processor.refreshAll();
+        this.outline.refresh();
+      })
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("changed", () => {
+        this.processor.refreshAll();
+        this.outline.refresh();
+      })
+    );
+    this.registerEvent(
+      this.app.metadataCache.on("resolved", () => {
+        this.processor.refreshAll();
+        this.outline.refresh();
       })
     );
     this.registerEvent(
@@ -630,12 +1501,14 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
     this.addSettingTab(new AutoIncrementedEmbedHeadingsSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
       this.processor.refreshAll();
+      this.outline.onLayoutChange();
     });
   }
   onunload() {
-    var _a, _b;
-    (_a = this.processor) == null ? void 0 : _a.restoreAll();
-    (_b = this.processor) == null ? void 0 : _b.destroy();
+    var _a, _b, _c;
+    (_a = this.outline) == null ? void 0 : _a.destroy();
+    (_b = this.processor) == null ? void 0 : _b.restoreAll();
+    (_c = this.processor) == null ? void 0 : _c.destroy();
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -650,8 +1523,10 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
   refreshHeadingLevels() {
     this.processor.restoreAll();
     this.processor.refreshAll();
+    this.outline.refresh();
   }
   reapplySettings() {
     this.refreshHeadingLevels();
+    this.outline.onSettingsChanged();
   }
 };

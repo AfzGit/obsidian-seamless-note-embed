@@ -43,6 +43,27 @@ function setDocument(body) {
   document.body.innerHTML = body;
 }
 
+function cacheHeading(text, level, line) {
+  return {
+    heading: text,
+    level,
+    position: {
+      start: { line, col: 0, offset: line * 100 },
+      end: { line, col: text.length, offset: line * 100 + text.length },
+    },
+  };
+}
+
+function cacheEmbed(link, line, col = 0) {
+  return {
+    link,
+    position: {
+      start: { line, col, offset: line * 100 + col },
+      end: { line, col: col + link.length + 4, offset: line * 100 + col + link.length + 4 },
+    },
+  };
+}
+
 test("shifts headings by the parent heading level", () => {
   setDocument(`
     <div class="markdown-preview-view">
@@ -375,4 +396,469 @@ test("findRenderRoot resolves an embed back to its top-level note", () => {
 
   const inner = document.querySelector("#inner");
   assert.equal(findRenderRoot(inner).id, "outer");
+});
+
+test("assigns outline keys from source positions even when earlier Live Preview embeds are virtualized", () => {
+  setDocument(`
+    <div class="cm-content">
+      <div class="cm-line HyperMD-header-1">fruits 1</div>
+      <div class="cm-line">
+        <div class="markdown-embed" id="orange" src="orange.md">
+          <div class="markdown-embed-content">
+            <h1>orange 1</h1>
+            <h2>orange 2</h2>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".cm-content");
+  const orange = root.querySelector("#orange");
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const appleFile = { path: "apple.md", extension: "md" };
+  const orangeFile = { path: "orange.md", extension: "md" };
+  const cacheByPath = new Map([
+    [
+      rootFile.path,
+      {
+        headings: [
+          { heading: "fruits 1", level: 1, position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 9, offset: 9 } } },
+          { heading: "fruits 2", level: 2, position: { start: { line: 3, col: 0, offset: 300 }, end: { line: 3, col: 9, offset: 309 } } },
+        ],
+        embeds: [
+          { link: "apple.md", position: { start: { line: 1, col: 0, offset: 100 }, end: { line: 1, col: 12, offset: 112 } } },
+          { link: "orange.md", position: { start: { line: 4, col: 2, offset: 402 }, end: { line: 4, col: 14, offset: 414 } } },
+        ],
+      },
+    ],
+    [
+      orangeFile.path,
+      {
+        headings: [
+          { heading: "orange 1", level: 1, position: { start: { line: 0, col: 0, offset: 0 }, end: { line: 0, col: 9, offset: 9 } } },
+          { heading: "orange 2", level: 2, position: { start: { line: 2, col: 0, offset: 200 }, end: { line: 2, col: 9, offset: 209 } } },
+        ],
+        embeds: [],
+      },
+    ],
+    [appleFile.path, { headings: [], embeds: [] }],
+  ]);
+
+  const source = [
+    "# fruits 1",
+    "![[apple.md]]",
+    "",
+    "## fruits 2",
+    "  ![[orange.md]]",
+  ].join("\n");
+
+  const view = {
+    file: rootFile,
+    getViewType: () => "markdown",
+    containerEl: root,
+    editor: {
+      getValue: () => source,
+      cm: {
+        posAtDOM: () => 402,
+        state: {
+          doc: {
+            lineAt: (offset) => ({
+              number: Math.floor(offset / 100) + 1,
+              from: Math.floor(offset / 100) * 100,
+            }),
+          },
+        },
+      },
+    },
+  };
+
+  const app = {
+    workspace: {
+      activeLeaf: null,
+      iterateAllLeaves(callback) {
+        callback({ view });
+      },
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) =>
+        path === "orange.md" ? orangeFile : path === "apple.md" ? appleFile : null,
+    },
+  };
+
+  const processor = makeProcessor(app);
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 3, text: "orange 1" },
+    { level: 4, text: "orange 2" },
+  ]);
+
+  const keys = Array.from(root.querySelectorAll("[data-aeih-outline-key]")).map(
+    (heading) => JSON.parse(heading.getAttribute("data-aeih-outline-key")),
+  );
+
+  // The apple embed is virtualized away, but the orange embed still uses its
+  // source index (1), matching the outline builder.
+  assert.deepEqual(keys, [
+    ["fruits.md", [1], "orange.md", 0],
+    ["fruits.md", [1], "orange.md", 2],
+  ]);
+
+  processor.destroy();
+});
+
+test("non-note embeds do not consume reading-view outline indices", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <h1>fruits 1</h1>
+      <div class="markdown-embed" src="image.png"></div>
+      <div class="markdown-embed" src="missing.md"></div>
+      <div class="markdown-embed" src="apple.md">
+        <div class="markdown-embed-content">
+          <h1>apple 1</h1>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const appleFile = { path: "apple.md", extension: "md" };
+  const imageFile = { path: "image.png", extension: "png" };
+  const cacheByPath = new Map([
+    [
+      rootFile.path,
+      {
+        headings: [cacheHeading("fruits 1", 1, 0)],
+        embeds: [
+          cacheEmbed("image.png", 1),
+          cacheEmbed("missing.md", 2),
+          cacheEmbed("apple.md", 3),
+        ],
+      },
+    ],
+    [
+      appleFile.path,
+      {
+        headings: [cacheHeading("apple 1", 1, 0)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const view = {
+    file: rootFile,
+    getViewType: () => "markdown",
+    containerEl: root,
+  };
+
+  const app = {
+    workspace: {
+      activeLeaf: null,
+      iterateAllLeaves(callback) {
+        callback({ view });
+      },
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) => {
+        if (path === "apple.md") {
+          return appleFile;
+        }
+        if (path === "image.png") {
+          return imageFile;
+        }
+        return null;
+      },
+    },
+  };
+
+  const processor = makeProcessor(app);
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "fruits 1" },
+    { level: 2, text: "apple 1" },
+  ]);
+
+  const keys = Array.from(root.querySelectorAll("[data-aeih-outline-key]")).map(
+    (heading) => JSON.parse(heading.getAttribute("data-aeih-outline-key")),
+  );
+  assert.deepEqual(keys, [["fruits.md", [0], "apple.md", 0]]);
+
+  processor.destroy();
+});
+
+test("non-note embeds do not consume Live Preview outline indices", () => {
+  setDocument(`
+    <div class="cm-content">
+      <div class="cm-line HyperMD-header-1">fruits 1</div>
+      <div class="cm-line">
+        <div class="markdown-embed" src="apple.md">
+          <div class="markdown-embed-content">
+            <h1>apple 1</h1>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".cm-content");
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const appleFile = { path: "apple.md", extension: "md" };
+  const imageFile = { path: "image.png", extension: "png" };
+  const cacheByPath = new Map([
+    [
+      rootFile.path,
+      {
+        headings: [cacheHeading("fruits 1", 1, 0)],
+        embeds: [cacheEmbed("image.png", 1), cacheEmbed("apple.md", 2)],
+      },
+    ],
+    [
+      appleFile.path,
+      {
+        headings: [cacheHeading("apple 1", 1, 0)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const source = ["# fruits 1", "![[image.png]]", "![[apple.md]]"].join("\n");
+  const view = {
+    file: rootFile,
+    getViewType: () => "markdown",
+    containerEl: root,
+    editor: {
+      getValue: () => source,
+      cm: {
+        posAtDOM: () => 200,
+        state: {
+          doc: {
+            lineAt: (offset) => ({
+              number: Math.floor(offset / 100) + 1,
+              from: Math.floor(offset / 100) * 100,
+            }),
+          },
+        },
+      },
+    },
+  };
+
+  const app = {
+    workspace: {
+      activeLeaf: null,
+      iterateAllLeaves(callback) {
+        callback({ view });
+      },
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) => {
+        if (path === "apple.md") {
+          return appleFile;
+        }
+        if (path === "image.png") {
+          return imageFile;
+        }
+        return null;
+      },
+    },
+  };
+
+  const processor = makeProcessor(app);
+  processor.refresh(root);
+
+  // The root heading is a CodeMirror line, so only the embedded heading is an
+  // actual h1-h6 element.
+  assert.deepEqual(headingLevels(root), [{ level: 2, text: "apple 1" }]);
+
+  const keys = Array.from(root.querySelectorAll("[data-aeih-outline-key]")).map(
+    (heading) => JSON.parse(heading.getAttribute("data-aeih-outline-key")),
+  );
+  assert.deepEqual(keys, [["fruits.md", [0], "apple.md", 0]]);
+
+  processor.destroy();
+});
+
+test("processes an embed inside a Reading View heading", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <h1>fruits 1
+        <div class="markdown-embed" src="apple.md">
+          <div class="markdown-embed-content">
+            <h1>apple 1</h1>
+          </div>
+        </div>
+      </h1>
+      <div class="markdown-embed" src="orange.md">
+        <div class="markdown-embed-content">
+          <h1>orange 1</h1>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  assert.ok(root.querySelector("h1 .markdown-embed"));
+
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const appleFile = { path: "apple.md", extension: "md" };
+  const orangeFile = { path: "orange.md", extension: "md" };
+  const cacheByPath = new Map([
+    [
+      rootFile.path,
+      {
+        headings: [cacheHeading("fruits 1", 1, 0)],
+        embeds: [cacheEmbed("apple.md", 0, 10), cacheEmbed("orange.md", 2)],
+      },
+    ],
+    [
+      appleFile.path,
+      {
+        headings: [cacheHeading("apple 1", 1, 0)],
+        embeds: [],
+      },
+    ],
+    [
+      orangeFile.path,
+      {
+        headings: [cacheHeading("orange 1", 1, 0)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const view = {
+    file: rootFile,
+    getViewType: () => "markdown",
+    containerEl: root,
+  };
+
+  const app = {
+    workspace: {
+      activeLeaf: null,
+      iterateAllLeaves(callback) {
+        callback({ view });
+      },
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) => {
+        if (path === "apple.md") {
+          return appleFile;
+        }
+        if (path === "orange.md") {
+          return orangeFile;
+        }
+        return null;
+      },
+    },
+  };
+
+  const processor = makeProcessor(app);
+  processor.refresh(root);
+
+  // The outer heading is a parent-note heading and is intentionally untracked;
+  // the embed inside it and the following embed are both shifted.
+  const embeddedLevels = Array.from(
+    root.querySelectorAll("[data-aeih-original-level]"),
+  ).map((heading) => ({
+    level: Number(heading.tagName.slice(1)),
+    text: heading.textContent,
+  }));
+  assert.deepEqual(embeddedLevels, [
+    { level: 2, text: "apple 1" },
+    { level: 2, text: "orange 1" },
+  ]);
+
+  const keys = Array.from(root.querySelectorAll("[data-aeih-outline-key]")).map(
+    (heading) => JSON.parse(heading.getAttribute("data-aeih-outline-key")),
+  );
+  assert.deepEqual(keys, [
+    ["fruits.md", [0], "apple.md", 0],
+    ["fruits.md", [1], "orange.md", 0],
+  ]);
+
+  processor.destroy();
+});
+
+test("uses the heading on the same line for an embed in Live Preview", () => {
+  setDocument(`
+    <div class="cm-content">
+      <div class="cm-line HyperMD-header-1">
+        fruits 1
+        <div class="markdown-embed" src="apple.md">
+          <div class="markdown-embed-content">
+            <h1>apple 1</h1>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".cm-content");
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const appleFile = { path: "apple.md", extension: "md" };
+  const cacheByPath = new Map([
+    [
+      rootFile.path,
+      {
+        headings: [cacheHeading("fruits 1", 1, 0)],
+        embeds: [cacheEmbed("apple.md", 0, 10)],
+      },
+    ],
+    [
+      appleFile.path,
+      {
+        headings: [cacheHeading("apple 1", 1, 0)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const source = "# fruits 1 ![[apple.md]]";
+  const view = {
+    file: rootFile,
+    getViewType: () => "markdown",
+    containerEl: root,
+    editor: {
+      getValue: () => source,
+      cm: {
+        posAtDOM: () => 0,
+        state: {
+          doc: {
+            lineAt: () => ({ number: 1, from: 0 }),
+          },
+        },
+      },
+    },
+  };
+
+  const app = {
+    workspace: {
+      activeLeaf: null,
+      iterateAllLeaves(callback) {
+        callback({ view });
+      },
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) => (path === "apple.md" ? appleFile : null),
+    },
+  };
+
+  const processor = makeProcessor(app);
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [{ level: 2, text: "apple 1" }]);
+
+  const keys = Array.from(root.querySelectorAll("[data-aeih-outline-key]")).map(
+    (heading) => JSON.parse(heading.getAttribute("data-aeih-outline-key")),
+  );
+  assert.deepEqual(keys, [["fruits.md", [0], "apple.md", 0]]);
+
+  processor.destroy();
 });

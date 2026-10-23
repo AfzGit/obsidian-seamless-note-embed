@@ -1,4 +1,6 @@
-import type { App, MarkdownView } from "obsidian";
+import type { App, EmbedCache, HeadingCache, MarkdownView } from "obsidian";
+import { filterSection, getFileData, resolveEmbedData } from "./embedData";
+import { findMatchingHeading } from "./embedTargets";
 import {
   headingLevelFromClasses,
   headingLevelFromTagName,
@@ -6,6 +8,7 @@ import {
   shiftHeadingLevel,
 } from "./headingMath";
 import { HeadingAtLine, nearestPrecedingHeadingLevel, parseHeadingLines } from "./headingSource";
+import { OUTLINE_KEY_ATTRIBUTE, makeOutlineKey } from "./outlineKeys";
 
 export const ORIGINAL_LEVEL_ATTRIBUTE = "data-aeih-original-level";
 const SHIFT_ATTRIBUTE = "data-aeih-shift";
@@ -27,9 +30,31 @@ interface CodeMirrorViewLike {
   posAtDOM(node: Node, offset?: number): number;
   state: {
     doc: {
-      lineAt(position: number): { number: number };
+      lineAt(position: number): { number: number; from?: number };
     };
   };
+}
+
+/**
+ * The source-note context for one rendered heading scope.
+ *
+ * The root note's scope is untracked. Each embed creates a new scope with the
+ * target note's metadata so rendered heading elements can be matched back to
+ * their cache entries and given stable outline keys.
+ */
+interface HeadingScopeContext {
+  isRoot: boolean;
+  rootPath: string | null;
+  sourcePath: string | null;
+  embedPath: number[];
+  headings: HeadingCache[] | null;
+  cursor: { value: number };
+}
+
+interface LivePreviewEmbedInfo {
+  level: number;
+  /** Index in the note's metadata embed list, so keys match the outline. */
+  index: number;
 }
 
 function isElement(value: unknown): value is HTMLElement {
@@ -74,7 +99,7 @@ export function findRenderRoot(element: HTMLElement): HTMLElement | null {
   }
 
   const codeMirrorRoot = element.closest<HTMLElement>(CM_ROOT_SELECTOR);
-  if (codeMirrorRoot) {
+  if (codeMirrorRoot && !codeMirrorRoot.closest(EMBED_CONTENT_SELECTOR)) {
     return codeMirrorRoot;
   }
 
@@ -258,7 +283,17 @@ export class EmbedHeadingProcessor {
   }
 
   private processReadingView(root: HTMLElement): void {
-    this.processScope(root, 0);
+    const view = this.findMarkdownView(root);
+    const rootPath = view?.file?.path ?? null;
+
+    this.processScope(root, 0, {
+      isRoot: true,
+      rootPath,
+      sourcePath: rootPath,
+      embedPath: [],
+      headings: null,
+      cursor: { value: 0 },
+    });
   }
 
   /**
@@ -267,12 +302,20 @@ export class EmbedHeadingProcessor {
    * that amount, and any embeds nested inside this scope inherit the last
    * shifted heading level seen.
    */
-  private processScope(scope: ParentNode, parentLevel: number): void {
+  private processScope(
+    scope: ParentNode,
+    parentLevel: number,
+    context: HeadingScopeContext,
+  ): void {
     let currentLevel = parentLevel;
+    let embedIndex = 0;
 
     const visit = (node: HTMLElement): void => {
       if (isMarkdownEmbed(node)) {
-        this.processEmbed(node, currentLevel);
+        const counted = this.processEmbed(node, currentLevel, context, embedIndex);
+        if (counted) {
+          embedIndex += 1;
+        }
         return;
       }
 
@@ -280,23 +323,36 @@ export class EmbedHeadingProcessor {
       if (tagLevel !== null) {
         const storedLevel = this.readStoredLevel(node);
         const originalLevel = storedLevel ?? tagLevel;
+        let container = node;
 
-        if (parentLevel === 0) {
-          // The parent note's own headings, and embeds before any heading,
-          // should not be modified. If this heading was shifted previously,
-          // put it back now.
+        if (context.isRoot) {
+          // The parent note's own headings are never shifted. If this heading
+          // was shifted previously (for example, an embed moved out from under
+          // a heading), put it back now.
           if (storedLevel !== null) {
-            this.restoreHeading(node);
+            container = this.restoreHeading(node);
           }
           currentLevel = originalLevel;
         } else {
+          // Embedded headings are tracked even when the shift is zero, because
+          // they still need an outline key.
           if (storedLevel === null) {
             node.setAttribute(ORIGINAL_LEVEL_ATTRIBUTE, String(originalLevel));
           }
 
           const effectiveLevel = shiftHeadingLevel(originalLevel, parentLevel);
-          this.applyHeadingLevel(node, effectiveLevel, originalLevel);
+          container = this.applyHeadingLevel(node, effectiveLevel, originalLevel);
           currentLevel = effectiveLevel;
+          this.assignOutlineKey(container, originalLevel, context);
+        }
+
+        // An embed can be part of a heading's rendered content. Visiting the
+        // heading's children keeps the DOM's embed indices aligned with the
+        // metadata-based outline (which counts such embeds under the heading).
+        for (const child of Array.from(container.children)) {
+          if (isElement(child)) {
+            visit(child);
+          }
         }
         return;
       }
@@ -315,20 +371,118 @@ export class EmbedHeadingProcessor {
     }
   }
 
-  private processEmbed(embed: HTMLElement, parentLevel: number): void {
+  private processEmbed(
+    embed: HTMLElement,
+    parentLevel: number,
+    parentContext: HeadingScopeContext,
+    embedIndex: number,
+  ): boolean {
     embed.setAttribute(SHIFT_ATTRIBUTE, String(parentLevel));
 
+    let sourcePath = parentContext.sourcePath;
+    let headings: HeadingCache[] | null = null;
+    let counted = false;
+    const src = embed.getAttribute("src");
+
+    if (src && sourcePath && this.app.metadataCache) {
+      try {
+        const resolved = resolveEmbedData(this.app, src, sourcePath);
+        if (resolved) {
+          // Only note embeds occupy an index in the outline's embed path.
+          // Media embeds are not `.markdown-embed` elements, and unresolved
+          // links are skipped by the outline builder as well.
+          counted = true;
+          const section = filterSection(resolved.data, resolved.subpath);
+          sourcePath = resolved.data.path;
+          headings = section ? section.headings : [];
+        }
+      } catch (error) {
+        console.error(
+          "Auto-Incremented Embed Headings: failed to resolve an embedded note",
+          error,
+        );
+      }
+    }
+
     const content = directEmbedContent(embed) ?? embed;
-    this.processScope(content, parentLevel);
+    this.processScope(content, parentLevel, {
+      isRoot: false,
+      rootPath: parentContext.rootPath,
+      sourcePath,
+      embedPath: [...parentContext.embedPath, embedIndex],
+      headings,
+      cursor: { value: 0 },
+    });
+
+    return counted;
+  }
+
+  private assignOutlineKey(
+    heading: HTMLElement,
+    originalLevel: number,
+    context: HeadingScopeContext,
+  ): void {
+    if (
+      context.isRoot ||
+      !context.rootPath ||
+      !context.sourcePath ||
+      !context.headings ||
+      context.headings.length === 0
+    ) {
+      heading.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+      return;
+    }
+
+    const text = heading.getAttribute("data-heading") ?? heading.textContent ?? "";
+    const match = findMatchingHeading(
+      context.headings,
+      context.cursor.value,
+      text,
+      originalLevel,
+    );
+
+    if (!match) {
+      heading.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+      return;
+    }
+
+    heading.setAttribute(
+      OUTLINE_KEY_ATTRIBUTE,
+      makeOutlineKey({
+        rootPath: context.rootPath,
+        embedPath: context.embedPath,
+        targetPath: context.sourcePath,
+        targetLine: match.heading.position.start.line,
+      }),
+    );
+    context.cursor.value = match.index + 1;
   }
 
   private processLivePreview(root: HTMLElement): void {
-    const editorShifts = this.getLivePreviewShifts(root);
+    const embedInfo = this.getLivePreviewEmbedInfo(root);
+    const view = this.findMarkdownView(root);
+    const rootPath = view?.file?.path ?? null;
+    const context: HeadingScopeContext = {
+      isRoot: true,
+      rootPath,
+      sourcePath: rootPath,
+      embedPath: [],
+      headings: null,
+      cursor: { value: 0 },
+    };
+
     let currentLevel = 0;
+    let fallbackEmbedIndex = -1;
 
     const visit = (node: HTMLElement): void => {
       if (isMarkdownEmbed(node)) {
-        this.processEmbed(node, editorShifts.get(node) ?? currentLevel);
+        const info = embedInfo.get(node);
+        let index = info?.index;
+        if (index === undefined) {
+          index = fallbackEmbedIndex;
+          fallbackEmbedIndex -= 1;
+        }
+        this.processEmbed(node, info?.level ?? currentLevel, context, index);
         return;
       }
 
@@ -366,28 +520,69 @@ export class EmbedHeadingProcessor {
 
   /**
    * In Live Preview the outer headings are CodeMirror lines, not `<h1>` tags,
-   * and CodeMirror virtualizes long notes. Read the heading positions from the
+   * and CodeMirror virtualizes long notes. Read heading positions from the
    * editor's current source instead, then map each rendered embed back to its
-   * source line.
+   * source line. The returned index comes from the note's metadata cache, so it
+   * still matches the outline when earlier embeds are scrolled out of view.
    */
-  private getLivePreviewShifts(root: HTMLElement): Map<HTMLElement, number> {
-    const shifts = new Map<HTMLElement, number>();
+  private getLivePreviewEmbedInfo(root: HTMLElement): Map<HTMLElement, LivePreviewEmbedInfo> {
+    const info = new Map<HTMLElement, LivePreviewEmbedInfo>();
     const view = this.findMarkdownView(root);
     if (!view) {
-      return shifts;
+      return info;
     }
 
     const editorView = (view.editor as unknown as { cm?: CodeMirrorViewLike }).cm;
     if (!editorView) {
-      return shifts;
+      return info;
     }
 
     let headings: HeadingAtLine[];
     try {
       headings = parseHeadingLines(view.editor.getValue().split(/\r?\n/));
     } catch {
-      return shifts;
+      return info;
     }
+
+    let rootEmbeds: Array<{ line: number; col: number }> = [];
+    const rootFile = view.file;
+    if (rootFile && this.app.metadataCache) {
+      try {
+        const fileData = getFileData(this.app, rootFile);
+        if (fileData) {
+          const noteEmbeds: EmbedCache[] = [];
+
+          for (const embed of fileData.embeds) {
+            try {
+              // Media embeds do not render as `.markdown-embed`, so they must
+              // not occupy an index in the outline's embed path.
+              if (!resolveEmbedData(this.app, embed.link, rootFile.path)) {
+                continue;
+              }
+            } catch {
+              continue;
+            }
+
+            noteEmbeds.push(embed);
+          }
+
+          rootEmbeds = noteEmbeds
+            .sort(
+              (left, right) =>
+                left.position.start.line - right.position.start.line ||
+                left.position.start.col - right.position.start.col,
+            )
+            .map((embed) => ({
+              line: embed.position.start.line,
+              col: embed.position.start.col,
+            }));
+        }
+      } catch {
+        rootEmbeds = [];
+      }
+    }
+
+    let fallbackIndex = -1;
 
     for (const embed of Array.from(root.querySelectorAll<HTMLElement>(EMBED_SELECTOR))) {
       if (embed.closest(EMBED_CONTENT_SELECTOR)) {
@@ -396,15 +591,44 @@ export class EmbedHeadingProcessor {
 
       try {
         const offset = editorView.posAtDOM(embed);
-        const line = editorView.state.doc.lineAt(offset).number - 1;
-        shifts.set(embed, nearestPrecedingHeadingLevel(headings, line));
+        const lineInfo = editorView.state.doc.lineAt(offset);
+        const line = lineInfo.number - 1;
+        const col =
+          typeof lineInfo.from === "number" ? offset - lineInfo.from : null;
+
+        let index = -1;
+        let bestDistance = Number.POSITIVE_INFINITY;
+
+        for (let candidateIndex = 0; candidateIndex < rootEmbeds.length; candidateIndex++) {
+          const candidate = rootEmbeds[candidateIndex];
+          if (candidate.line !== line) {
+            continue;
+          }
+
+          const distance =
+            col === null ? 0 : Math.abs(candidate.col - col);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            index = candidateIndex;
+          }
+        }
+
+        if (index === -1) {
+          index = fallbackIndex;
+          fallbackIndex -= 1;
+        }
+
+        info.set(embed, {
+          level: nearestPrecedingHeadingLevel(headings, line),
+          index,
+        });
       } catch {
         // A widget may not have a DOM position while it is being recycled.
         // The caller falls back to the nearest visible heading line.
       }
     }
 
-    return shifts;
+    return info;
   }
 
   private findMarkdownView(element: HTMLElement): MarkdownView | null {
@@ -438,9 +662,14 @@ export class EmbedHeadingProcessor {
     return null;
   }
 
-  private applyHeadingLevel(heading: HTMLElement, level: number, originalLevel: number): void {
+  private applyHeadingLevel(
+    heading: HTMLElement,
+    level: number,
+    originalLevel: number,
+  ): HTMLElement {
     const replacement = this.replaceHeading(heading, level);
     replacement.setAttribute(SHIFT_ATTRIBUTE, String(level - originalLevel));
+    return replacement;
   }
 
   /**
@@ -486,11 +715,12 @@ export class EmbedHeadingProcessor {
         this.restoreHeading(element);
       } else {
         element.removeAttribute(SHIFT_ATTRIBUTE);
+        element.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
       }
     }
   }
 
-  private restoreHeading(heading: HTMLElement): void {
+  private restoreHeading(heading: HTMLElement): HTMLElement {
     const stored = heading.getAttribute(ORIGINAL_LEVEL_ATTRIBUTE);
     const original = stored === null ? Number.NaN : Number.parseInt(stored, 10);
 
@@ -501,12 +731,16 @@ export class EmbedHeadingProcessor {
 
     restored.removeAttribute(ORIGINAL_LEVEL_ATTRIBUTE);
     restored.removeAttribute(SHIFT_ATTRIBUTE);
+    restored.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+    return restored;
   }
 
   private ensureObserver(root: HTMLElement): void {
     if (this.observers.has(root)) {
       return;
-    }    const observer = new MutationObserver((records) => {
+    }
+
+    const observer = new MutationObserver((records) => {
       if (!root.isConnected) {
         this.disconnectRoot(root);
         return;
@@ -526,20 +760,33 @@ export class EmbedHeadingProcessor {
       return false;
     }
 
-    for (const added of Array.from(record.addedNodes)) {
-      if (!isElement(added)) {
-        continue;
+    const containsRelevantElement = (node: Node): boolean => {
+      if (!isElement(node)) {
+        return false;
       }
 
       if (
-        added.matches(HEADING_SELECTOR) ||
-        added.matches(EMBED_SELECTOR) ||
-        added.matches(EMBED_CONTENT_SELECTOR)
+        node.matches(HEADING_SELECTOR) ||
+        node.matches(EMBED_SELECTOR) ||
+        node.matches(EMBED_CONTENT_SELECTOR)
       ) {
         return true;
       }
 
-      if (added.querySelector(`${HEADING_SELECTOR}, ${EMBED_SELECTOR}, ${EMBED_CONTENT_SELECTOR}`)) {
+      return !!node.querySelector(
+        `${HEADING_SELECTOR}, ${EMBED_SELECTOR}, ${EMBED_CONTENT_SELECTOR}`,
+      );
+    };
+
+    // Removals matter too: deleting an embed changes the source indices of the
+    // embeds after it, which are part of their outline keys.
+    for (const node of Array.from(record.addedNodes)) {
+      if (containsRelevantElement(node)) {
+        return true;
+      }
+    }
+    for (const node of Array.from(record.removedNodes)) {
+      if (containsRelevantElement(node)) {
         return true;
       }
     }
