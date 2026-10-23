@@ -55,6 +55,16 @@ The embedded headings also appear in Obsidian's built-in **Outline** view with t
 
 Clicking an embedded heading in the outline navigates to the embed. Once the note is rendered, the plugin also scrolls to the exact shifted heading. Section embeds such as `![[note#Heading]]` work as expected; block embeds (`![[note#^block]]`) do not add headings.
 
+### Third-party outline plugins
+
+**Quiet Outline** and **Subtle TOC** also show the embedded headings. The plugin exposes the shifted headings through Obsidian's in-memory metadata cache, so metadata-cache-based outline plugins see them without any change to your notes. Clicking one navigates to the embed and then scrolls to the exact rendered heading.
+
+Navigation is handled generically rather than per plugin. Embedded headings receive unique virtual line and offset values in the metadata cache, and a bridge translates those values through Obsidian's normal editor, preview, subpath-link, and CodeMirror APIs. That covers outline plugins, heading search commands such as Another Quick Switcher's **Header search in file**, and ordinary links to an embedded heading.
+
+Quiet Outline's context menu and drag handling are disabled for embedded headings. Those entries point at the embed line in the parent note, so editing or moving them would change the embed link instead of the embedded note.
+
+Other plugins that read `metadataCache.getFileCache(file).headings` will generally show the embedded headings too, and plugins that navigate through the common APIs above should land on the exact heading. A plugin that bypasses all of them may still stop at the embed line.
+
 ## Install
 
 ### From source
@@ -115,14 +125,18 @@ The line, indentation, filename, scrollbar, open-note button, and height-limit r
 
 For the Outline view, the plugin builds the same hierarchy from Obsidian's metadata cache: the note's own headings plus the headings of each embedded note, shifted recursively. It then augments the core Outline view's heading list. The Outline's existing rendering, search, folding, and navigation are reused; no separate sidebar is added.
 
+For third-party plugins, the same virtual headings are returned through a wrapped `metadataCache.getFileCache`. The wrapper is transparent to this plugin's own code, which always reads the real cache, so embedded headings are never counted twice. Each embedded heading gets a unique fractional line and a virtual offset, which preserve outline order and give offset-based navigation a stable token. A navigation bridge maps those tokens back to the embed's real line and then scrolls to the rendered heading. Turning off heading shifting makes the wrapper return the real cache, and unloading the plugin removes the wrapper and the bridge.
+
 In Live Preview, the parent note's headings are CodeMirror lines rather than `<h1>` tags, and long notes are virtualized. The plugin therefore reads heading positions from the editor's current source and matches each rendered embed to its source position, so off-screen embeds do not disturb the outline order.
 
-**No vault files are written to.** Only the rendered DOM and the in-memory outline list are changed.
+**No vault files are written to.** Only the rendered DOM, the in-memory outline list, and a temporary in-memory metadata-cache view are changed.
 
 ## Limitations
 
 - Heading levels are clamped at `h6`; HTML has no `h7`.
 - Outline support uses Obsidian's internal Outline view methods. If a future Obsidian version changes them, the plugin leaves the view untouched and heading shifting still works, but embedded headings may disappear from the outline.
+- Quiet Outline and Subtle TOC safe-editing support uses those plugins' internal methods. If a future version changes them, the headings still appear through the metadata cache, but Quiet Outline editing guards may not apply.
+- Exposing virtual headings through the metadata cache means other plugins that read headings can see embedded headings too. This is intentional for outline and search support, but it may affect plugins that treat every cached heading as a real heading in the parent note. Plugins that bypass the bridged navigation APIs may stop at the embed line.
 - Outline entries are rebuilt from the metadata cache, so newly typed headings and embeds appear after Obsidian updates its cache.
 - Clicking an embedded outline entry jumps to the embed. Exact scrolling to the heading requires that heading to be rendered; in a long, virtualized Live Preview note it may not be available until scrolled into view.
 - Block embeds do not contribute headings to the outline. Section embeds and nested embeds are supported.

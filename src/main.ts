@@ -1,6 +1,9 @@
 import { Plugin } from "obsidian";
+import { MetadataHeadingIntegration } from "./metadataHeadings";
+import { HeadingNavigationBridge } from "./navigationBridge";
 import { OutlineIntegration } from "./outline";
 import { EmbedHeadingProcessor, findRenderRoot } from "./processor";
+import { ThirdPartyOutlineIntegration } from "./thirdPartyOutlines";
 import {
   AutoIncrementedEmbedHeadingsSettingTab,
   DEFAULT_SETTINGS,
@@ -42,14 +45,35 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
   settings!: PluginSettings;
   private processor!: EmbedHeadingProcessor;
   private outline!: OutlineIntegration;
+  private metadataHeadings!: MetadataHeadingIntegration;
+  private navigationBridge!: HeadingNavigationBridge;
+  private thirdPartyOutlines!: ThirdPartyOutlineIntegration;
 
   async onload(): Promise<void> {
     await this.loadSettings();
     this.applyAppearanceSettings();
 
+    this.metadataHeadings = new MetadataHeadingIntegration(
+      this.app,
+      () => this.settings,
+    );
+    this.metadataHeadings.start();
+
+    this.navigationBridge = new HeadingNavigationBridge(
+      this.app,
+      this.metadataHeadings,
+    );
+    this.navigationBridge.start();
+
     this.processor = new EmbedHeadingProcessor(this.app, () => this.settings);
     this.outline = new OutlineIntegration(this.app, () => this.settings);
     this.outline.start();
+
+    this.thirdPartyOutlines = new ThirdPartyOutlineIntegration(
+      this.app,
+      this.metadataHeadings,
+    );
+    this.thirdPartyOutlines.start();
 
     this.registerMarkdownPostProcessor((element) => {
       if (!this.settings.enabled) {
@@ -65,21 +89,27 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
         this.processor.refreshAll();
+        this.navigationBridge.onLayoutChange();
         this.outline.onLayoutChange();
+        this.thirdPartyOutlines.onLayoutChange();
       }),
     );
 
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         this.processor.refreshAll();
+        this.navigationBridge.onLayoutChange();
         this.outline.refresh();
+        this.thirdPartyOutlines.onLayoutChange();
       }),
     );
 
     this.registerEvent(
       this.app.workspace.on("file-open", () => {
         this.processor.refreshAll();
+        this.navigationBridge.onLayoutChange();
         this.outline.refresh();
+        this.thirdPartyOutlines.onLayoutChange();
       }),
     );
 
@@ -87,15 +117,54 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
       this.app.metadataCache.on("changed", () => {
         // Keep the rendered outline keys in sync when the cache catches up
         // with an edit that added, removed, or reordered embeds.
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
         this.processor.refreshAll();
         this.outline.refresh();
+        this.thirdPartyOutlines.refresh();
       }),
     );
 
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
         this.processor.refreshAll();
         this.outline.refresh();
+        this.thirdPartyOutlines.refresh();
+      }),
+    );
+
+    // Clear the virtual-heading cache before Obsidian emits metadata changes.
+    // That way Quiet Outline and Subtle TOC never read a stale augmented
+    // cache during their own "changed" handlers.
+    this.registerEvent(
+      this.app.vault.on("modify", () => {
+        this.metadataHeadings.refresh();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on("create", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
+        this.thirdPartyOutlines.refresh();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on("delete", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
+        this.thirdPartyOutlines.refresh();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on("rename", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
+        this.thirdPartyOutlines.refresh();
       }),
     );
 
@@ -119,12 +188,19 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
 
     this.app.workspace.onLayoutReady(() => {
       this.processor.refreshAll();
+      this.navigationBridge.onLayoutChange();
       this.outline.onLayoutChange();
+      this.thirdPartyOutlines.onLayoutChange();
     });
   }
 
   onunload(): void {
     this.clearAppearanceSettings();
+    // Restore the navigation hooks before the metadata cache, then let the
+    // third-party integrations refresh against the real headings.
+    this.navigationBridge?.destroy();
+    this.metadataHeadings?.destroy();
+    this.thirdPartyOutlines?.destroy();
     this.outline?.destroy();
     this.processor?.restoreAll();
     this.processor?.destroy();
@@ -143,9 +219,12 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
    * again. Used when a setting changes or the user asks for a manual refresh.
    */
   refreshHeadingLevels(): void {
+    this.metadataHeadings.refresh();
+    this.navigationBridge.refresh();
     this.processor.restoreAll();
     this.processor.refreshAll();
     this.outline.refresh();
+    this.thirdPartyOutlines.refresh();
   }
 
   /**
@@ -221,7 +300,10 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
 
   reapplySettings(): void {
     this.applyAppearanceSettings();
+    this.metadataHeadings.onSettingsChanged();
+    this.navigationBridge.onSettingsChanged();
     this.refreshHeadingLevels();
     this.outline.onSettingsChanged();
+    this.thirdPartyOutlines.onSettingsChanged();
   }
 }

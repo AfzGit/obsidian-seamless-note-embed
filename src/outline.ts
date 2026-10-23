@@ -1,5 +1,6 @@
 import type { App, HeadingCache, TFile } from "obsidian";
 import { getFileData } from "./embedData";
+import { HeadingScroller } from "./headingNavigation";
 import { buildOutlineHeadings, type OutlineHeading } from "./outlineHeadings";
 import { OUTLINE_KEY_ATTRIBUTE, type OutlineEmbedMeta } from "./outlineKeys";
 
@@ -21,12 +22,6 @@ interface OutlineViewLike {
   update?: () => unknown;
   createItemDom?: (heading: HeadingCache) => OutlineItemLike;
   findActiveHeading?: (view: unknown) => OutlineItemLike | null;
-}
-
-interface MarkdownViewLike {
-  file?: TFile | null;
-  contentEl?: HTMLElement;
-  getViewType?: () => string;
 }
 
 interface WorkspaceLeafLike {
@@ -101,15 +96,17 @@ function undecorateView(view: OutlineViewLike): void {
  */
 export class OutlineIntegration {
   private readonly patches = new Map<OutlineViewLike, PatchState>();
+  private readonly scroller: HeadingScroller;
   private refreshFrame: number | null = null;
-  private scrollToken = 0;
   private active = false;
   private destroyed = false;
 
   constructor(
     private readonly app: App,
     private readonly getSettings: () => { enabled: boolean },
-  ) {}
+  ) {
+    this.scroller = new HeadingScroller(app);
+  }
 
   start(): void {
     if (this.destroyed || !this.getSettings().enabled) {
@@ -123,7 +120,7 @@ export class OutlineIntegration {
 
   stop(): void {
     this.active = false;
-    this.scrollToken += 1;
+    this.scroller.cancel();
 
     if (this.refreshFrame !== null) {
       window.cancelAnimationFrame(this.refreshFrame);
@@ -286,12 +283,18 @@ export class OutlineIntegration {
 
     const metaByKey = new Map<string, OutlineEmbedMeta>();
 
-    const getHeadings = (): HeadingCache[] => {
-      let fallback: HeadingCache[] = [];
+    const useFallbackHeadings = (): HeadingCache[] => {
       try {
         const original = boundGetHeadings();
         if (Array.isArray(original)) {
-          fallback = original;
+          // The metadata cache may already contain virtual headings from the
+          // third-party integration. Keep their navigation metadata usable.
+          for (const heading of original as OutlineHeading[]) {
+            if (heading.aeih) {
+              metaByKey.set(heading.aeih.key, heading.aeih);
+            }
+          }
+          return original;
         }
       } catch (error) {
         console.error(
@@ -300,21 +303,25 @@ export class OutlineIntegration {
         );
       }
 
+      return [];
+    };
+
+    const getHeadings = (): HeadingCache[] => {
       metaByKey.clear();
 
       if (!this.active || !this.getSettings().enabled) {
-        return fallback;
+        return useFallbackHeadings();
       }
 
       const file = view.file;
       if (!file || file.extension !== "md") {
-        return fallback;
+        return useFallbackHeadings();
       }
 
       try {
         const fileData = getFileData(this.app, file);
         if (!fileData) {
-          return fallback;
+          return useFallbackHeadings();
         }
 
         const combined = buildOutlineHeadings(fileData, (path, sourcePath) => {
@@ -342,7 +349,7 @@ export class OutlineIntegration {
           "Seamless Note Embed: failed to build the outline",
           error,
         );
-        return fallback;
+        return useFallbackHeadings();
       }
     };
 
@@ -405,7 +412,7 @@ export class OutlineIntegration {
 
       // Any new outline click supersedes an exact-scroll retry that is still
       // waiting for an embed to render.
-      this.scrollToken += 1;
+      this.scroller.cancel();
 
       const element = event.target as HTMLElement | null;
       if (!element || typeof element.closest !== "function") {
@@ -523,80 +530,10 @@ export class OutlineIntegration {
   }
 
   private scheduleScrollToHeading(view: OutlineViewLike, meta: OutlineEmbedMeta): void {
-    const file = view.file;
-    if (!file) {
+    if (!this.active) {
       return;
     }
 
-    const token = ++this.scrollToken;
-    let attempts = 0;
-
-    const tryScroll = (): void => {
-      if (!this.active || token !== this.scrollToken) {
-        return;
-      }
-
-      const markdownView = this.findMarkdownViewForFile(file);
-      const contentEl = markdownView?.contentEl;
-      if (contentEl) {
-        const heading = this.findHeadingElement(contentEl, meta.key);
-        if (heading) {
-          heading.scrollIntoView({ block: "center", behavior: "smooth" });
-          return;
-        }
-      }
-
-      if (attempts++ < 40) {
-        window.setTimeout(tryScroll, 50);
-      }
-    };
-
-    window.setTimeout(tryScroll, 0);
-  }
-
-  private findMarkdownViewForFile(file: TFile): MarkdownViewLike | null {
-    const activeView = this.app.workspace.activeLeaf?.view as
-      | MarkdownViewLike
-      | undefined;
-    if (activeView && this.isMarkdownViewForFile(activeView, file)) {
-      return activeView;
-    }
-
-    let match: MarkdownViewLike | null = null;
-    this.app.workspace.iterateAllLeaves((leaf) => {
-      if (match) {
-        return;
-      }
-
-      const view = leaf.view as unknown as MarkdownViewLike;
-      if (this.isMarkdownViewForFile(view, file)) {
-        match = view;
-      }
-    });
-
-    return match;
-  }
-
-  private isMarkdownViewForFile(
-    view: MarkdownViewLike | null | undefined,
-    file: TFile,
-  ): boolean {
-    return (
-      !!view && view.getViewType?.() === "markdown" && view.file?.path === file.path
-    );
-  }
-
-  private findHeadingElement(container: HTMLElement, key: string): HTMLElement | null {
-    const elements = container.querySelectorAll<HTMLElement>(
-      `[${OUTLINE_KEY_ATTRIBUTE}]`,
-    );
-
-    for (const element of Array.from(elements)) {
-      if (element.getAttribute(OUTLINE_KEY_ATTRIBUTE) === key) {
-        return element;
-      }
-    }
-
-    return null;
+    this.scroller.schedule(view.file, meta.key);
   }
 }

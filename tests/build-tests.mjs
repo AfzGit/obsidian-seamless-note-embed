@@ -49,3 +49,27 @@ await esbuild.build({
   entryPoints: ["src/outline.ts"],
   outfile: "tests/.tmp/outline.cjs",
 });
+
+await esbuild.build({
+  ...common,
+  entryPoints: ["src/metadataHeadings.ts"],
+  outfile: "tests/.tmp/metadataHeadings.cjs",
+});
+
+await esbuild.build({
+  ...common,
+  entryPoints: ["tests/metadataApi.ts"],
+  outfile: "tests/.tmp/metadataApi.cjs",
+});
+
+await esbuild.build({
+  ...common,
+  entryPoints: ["src/thirdPartyOutlines.ts"],
+  outfile: "tests/.tmp/thirdPartyOutlines.cjs",
+});
+
+await esbuild.build({
+  ...common,
+  entryPoints: ["src/navigationBridge.ts"],
+  outfile: "tests/.tmp/navigationBridge.cjs",
+});

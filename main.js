@@ -92,13 +92,28 @@ function findMatchingHeading(headings, startIndex, text, level) {
   return null;
 }
 
+// src/rawMetadata.ts
+var rawGetters = /* @__PURE__ */ new WeakMap();
+function registerRawFileCache(app, getter) {
+  rawGetters.set(app, getter);
+}
+function unregisterRawFileCache(app, getter) {
+  if (rawGetters.get(app) === getter) {
+    rawGetters.delete(app);
+  }
+}
+function getRawFileCache(app, file) {
+  const getter = rawGetters.get(app);
+  return getter ? getter(file) : app.metadataCache.getFileCache(file);
+}
+
 // src/embedData.ts
 function getFileData(app, file) {
   var _a, _b;
   if (!file || file.extension !== "md") {
     return null;
   }
-  const cache = app.metadataCache.getFileCache(file);
+  const cache = getRawFileCache(app, file);
   if (!cache) {
     return null;
   }
@@ -318,6 +333,1010 @@ function appendEmbeddedHeadings(options) {
   return true;
 }
 
+// src/metadataHeadings.ts
+var VIRTUAL_OFFSET_BASE = 2 ** 40;
+var VIRTUAL_OFFSET_STRIDE = 2 ** 16;
+function makeSignature(cache) {
+  var _a, _b;
+  const parts = [];
+  for (const heading of (_a = cache.headings) != null ? _a : []) {
+    parts.push(["h", heading.level, heading.position.start.line, heading.heading]);
+  }
+  for (const embed of (_b = cache.embeds) != null ? _b : []) {
+    parts.push(["e", embed.position.start.line, embed.link]);
+  }
+  return JSON.stringify(parts);
+}
+function hashText(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+function toMetadataHeading(heading, token) {
+  return {
+    ...heading,
+    position: {
+      start: {
+        line: token.line,
+        col: token.col,
+        offset: token.offset
+      },
+      end: {
+        line: token.line,
+        col: token.col + heading.heading.length,
+        offset: token.endOffset
+      }
+    }
+  };
+}
+var MetadataHeadingIntegration = class {
+  constructor(app, getSettings) {
+    this.app = app;
+    this.getSettings = getSettings;
+    this.cache = /* @__PURE__ */ new WeakMap();
+    this.active = false;
+    this.destroyed = false;
+    this.building = 0;
+    this.originalGetFileCache = null;
+    this.installedGetFileCache = null;
+    this.hadOwnGetFileCache = false;
+    this.originalOwnGetFileCache = null;
+    this.tokensByOffset = /* @__PURE__ */ new Map();
+    this.tokensByLine = /* @__PURE__ */ new Map();
+    this.tokensByFile = /* @__PURE__ */ new Map();
+  }
+  start() {
+    if (this.destroyed || this.active) {
+      return;
+    }
+    const metadataCache = this.app.metadataCache;
+    const ownGetFileCache = metadataCache.getFileCache;
+    if (typeof ownGetFileCache !== "function") {
+      return;
+    }
+    this.hadOwnGetFileCache = Object.prototype.hasOwnProperty.call(
+      metadataCache,
+      "getFileCache"
+    );
+    this.originalOwnGetFileCache = ownGetFileCache;
+    const original = ownGetFileCache.bind(metadataCache);
+    this.originalGetFileCache = original;
+    const getFileCache = (file) => {
+      var _a, _b;
+      const cache = original(file);
+      if (!cache || !this.active || this.destroyed || this.building > 0 || !this.getSettings().enabled || !file || file.extension !== "md") {
+        return cache;
+      }
+      try {
+        return (_b = (_a = this.getAugmentedCache(file, cache)) == null ? void 0 : _a.cache) != null ? _b : cache;
+      } catch (error) {
+        console.error(
+          "Seamless Note Embed: failed to augment the metadata cache",
+          error
+        );
+        return cache;
+      }
+    };
+    this.installedGetFileCache = getFileCache;
+    if (!Reflect.set(metadataCache, "getFileCache", getFileCache)) {
+      this.installedGetFileCache = null;
+      return;
+    }
+    registerRawFileCache(this.app, original);
+    this.active = true;
+    this.refresh();
+  }
+  stop() {
+    if (!this.active) {
+      return;
+    }
+    const metadataCache = this.app.metadataCache;
+    if (Reflect.get(metadataCache, "getFileCache") === this.installedGetFileCache) {
+      if (this.hadOwnGetFileCache) {
+        Reflect.set(metadataCache, "getFileCache", this.originalOwnGetFileCache);
+      } else {
+        Reflect.deleteProperty(metadataCache, "getFileCache");
+      }
+      if (this.originalGetFileCache) {
+        unregisterRawFileCache(this.app, this.originalGetFileCache);
+      }
+    }
+    this.active = false;
+    this.originalGetFileCache = null;
+    this.installedGetFileCache = null;
+    this.refresh();
+  }
+  destroy() {
+    this.stop();
+    this.destroyed = true;
+  }
+  /** Drop cached augmented caches after a file or its embeds changed. */
+  refresh() {
+    this.cache = /* @__PURE__ */ new WeakMap();
+    this.tokensByOffset.clear();
+    this.tokensByLine.clear();
+    this.tokensByFile.clear();
+  }
+  onSettingsChanged() {
+    this.refresh();
+  }
+  /** Resolve a virtual offset embedded in a synthetic heading's position. */
+  resolveVirtualOffset(offset) {
+    if (!this.active || this.destroyed || offset < VIRTUAL_OFFSET_BASE) {
+      return null;
+    }
+    const exact = this.tokensByOffset.get(offset);
+    if (exact) {
+      return exact;
+    }
+    for (const token of this.tokensByOffset.values()) {
+      if (offset >= token.offset && offset <= token.endOffset) {
+        return token;
+      }
+    }
+    return null;
+  }
+  /** Resolve a virtual line in one note. */
+  resolveVirtualLine(file, line) {
+    var _a, _b;
+    if (!this.active || this.destroyed || !file) {
+      return null;
+    }
+    return (_b = (_a = this.tokensByLine.get(file.path)) == null ? void 0 : _a.get(line)) != null ? _b : null;
+  }
+  /**
+   * Resolve a heading subpath such as `#apple 2` to a virtual heading. This is
+   * used for normal Obsidian links, not only outline-plugin navigation.
+   */
+  resolveVirtualSubpath(file, subpath) {
+    var _a;
+    if (!this.active || this.destroyed || !file || !subpath) {
+      return null;
+    }
+    const raw = getRawFileCache(this.app, file);
+    if (!raw) {
+      return null;
+    }
+    try {
+      const augmented = this.getAugmentedCache(file, raw);
+      if (!augmented) {
+        return null;
+      }
+      const range = resolveHeadingSubpath(
+        (_a = augmented.cache.headings) != null ? _a : [],
+        subpath
+      );
+      return range ? this.resolveVirtualLine(file, range.startLine) : null;
+    } catch (error) {
+      console.error(
+        "Seamless Note Embed: failed to resolve an embedded heading link",
+        error
+      );
+      return null;
+    }
+  }
+  /**
+   * The combined heading list for a note, including synthetic headings.
+   * Used by third-party outline integrations to attach navigation metadata.
+   */
+  getCombinedHeadings(file) {
+    var _a;
+    if (!this.active || !file || file.extension !== "md" || !this.getSettings().enabled) {
+      return null;
+    }
+    const cache = getRawFileCache(this.app, file);
+    if (!cache) {
+      return null;
+    }
+    try {
+      const augmented = this.getAugmentedCache(file, cache);
+      if (augmented) {
+        return augmented.combined;
+      }
+    } catch (error) {
+      console.error(
+        "Seamless Note Embed: failed to build headings for a third-party outline",
+        error
+      );
+    }
+    return (_a = cache.headings) != null ? _a : [];
+  }
+  getAugmentedCache(file, raw) {
+    var _a;
+    if (!((_a = raw.embeds) == null ? void 0 : _a.length)) {
+      return null;
+    }
+    const signature = makeSignature(raw);
+    const cached = this.cache.get(file);
+    if (cached && cached.raw === raw && cached.signature === signature) {
+      return cached.result;
+    }
+    const realCombined = this.buildHeadings(file, raw);
+    const combined = this.virtualizeHeadings(file, realCombined);
+    const hasEmbeddedHeadings = combined.some((heading) => heading.aeih);
+    const result = hasEmbeddedHeadings ? {
+      cache: {
+        ...raw,
+        headings: combined
+      },
+      combined
+    } : null;
+    this.cache.set(file, { raw, signature, result });
+    return result;
+  }
+  /**
+   * Give every synthetic heading a unique position. The fractional line keeps
+   * outline order intact, while the virtual offset gives offset-based
+   * navigation (for example Another Quick Switcher's header search) a token it
+   * can resolve exactly.
+   */
+  virtualizeHeadings(file, headings) {
+    this.removeTokensForFile(file.path);
+    const groups = /* @__PURE__ */ new Map();
+    for (const heading of headings) {
+      if (!heading.aeih) {
+        continue;
+      }
+      const group = groups.get(heading.aeih.embedLine);
+      if (group) {
+        group.push(heading);
+      } else {
+        groups.set(heading.aeih.embedLine, [heading]);
+      }
+    }
+    if (groups.size === 0) {
+      return headings;
+    }
+    const tokens = /* @__PURE__ */ new Map();
+    for (const [embedLine, group] of groups) {
+      for (let index = 0; index < group.length; index++) {
+        const heading = group[index];
+        const meta = heading.aeih;
+        if (!meta) {
+          continue;
+        }
+        const line = embedLine + (index + 1) / (group.length + 1);
+        const col = index;
+        const offset = this.allocateOffset(file.path, meta.key);
+        const token = {
+          file,
+          filePath: file.path,
+          meta,
+          heading: heading.heading,
+          level: heading.level,
+          line,
+          col,
+          offset,
+          endOffset: offset + heading.heading.length,
+          realLine: embedLine
+        };
+        tokens.set(heading, token);
+        this.registerToken(token);
+      }
+    }
+    return headings.map((heading) => {
+      const token = tokens.get(heading);
+      return token ? toMetadataHeading(heading, token) : heading;
+    });
+  }
+  allocateOffset(filePath, key) {
+    let offset = VIRTUAL_OFFSET_BASE + hashText(`${filePath}\0${key}`) * VIRTUAL_OFFSET_STRIDE;
+    while (this.tokensByOffset.has(offset)) {
+      offset += VIRTUAL_OFFSET_STRIDE;
+    }
+    return offset;
+  }
+  registerToken(token) {
+    this.tokensByOffset.set(token.offset, token);
+    let byLine = this.tokensByLine.get(token.filePath);
+    if (!byLine) {
+      byLine = /* @__PURE__ */ new Map();
+      this.tokensByLine.set(token.filePath, byLine);
+    }
+    byLine.set(token.line, token);
+    const fileTokens = this.tokensByFile.get(token.filePath);
+    if (fileTokens) {
+      fileTokens.push(token);
+    } else {
+      this.tokensByFile.set(token.filePath, [token]);
+    }
+  }
+  removeTokensForFile(filePath) {
+    const fileTokens = this.tokensByFile.get(filePath);
+    if (!fileTokens) {
+      return;
+    }
+    const byLine = this.tokensByLine.get(filePath);
+    for (const token of fileTokens) {
+      this.tokensByOffset.delete(token.offset);
+      byLine == null ? void 0 : byLine.delete(token.line);
+    }
+    if (byLine && byLine.size === 0) {
+      this.tokensByLine.delete(filePath);
+    }
+    this.tokensByFile.delete(filePath);
+  }
+  buildHeadings(file, raw) {
+    var _a, _b, _c;
+    const source = {
+      path: file.path,
+      headings: (_a = raw.headings) != null ? _a : [],
+      embeds: (_b = raw.embeds) != null ? _b : []
+    };
+    this.building += 1;
+    try {
+      return buildOutlineHeadings(source, (path, sourcePath) => {
+        var _a2, _b2;
+        try {
+          const target = this.app.metadataCache.getFirstLinkpathDest(
+            path,
+            sourcePath
+          );
+          if (!target || target.extension !== "md") {
+            return null;
+          }
+          const targetCache = getRawFileCache(this.app, target);
+          if (!targetCache) {
+            return null;
+          }
+          return {
+            file: target,
+            path: target.path,
+            headings: (_a2 = targetCache.headings) != null ? _a2 : [],
+            embeds: (_b2 = targetCache.embeds) != null ? _b2 : []
+          };
+        } catch (error) {
+          console.error(
+            "Seamless Note Embed: failed to resolve an embed for the outline",
+            error
+          );
+          return null;
+        }
+      });
+    } catch (error) {
+      console.error(
+        "Seamless Note Embed: failed to build embedded outline headings",
+        error
+      );
+      return (_c = raw.headings) != null ? _c : [];
+    } finally {
+      this.building -= 1;
+    }
+  }
+};
+
+// src/headingNavigation.ts
+function isMarkdownViewForFile(view, file) {
+  var _a, _b;
+  return !!view && ((_a = view.getViewType) == null ? void 0 : _a.call(view)) === "markdown" && ((_b = view.file) == null ? void 0 : _b.path) === file.path;
+}
+function findMarkdownViewForFile(app, file) {
+  var _a;
+  const activeView = (_a = app.workspace.activeLeaf) == null ? void 0 : _a.view;
+  if (activeView && isMarkdownViewForFile(activeView, file)) {
+    return activeView;
+  }
+  let match = null;
+  app.workspace.iterateAllLeaves((leaf) => {
+    if (match) {
+      return;
+    }
+    const view = leaf.view;
+    if (isMarkdownViewForFile(view, file)) {
+      match = view;
+    }
+  });
+  return match;
+}
+function findHeadingElement(container, key) {
+  const elements = container.querySelectorAll(
+    `[${OUTLINE_KEY_ATTRIBUTE}]`
+  );
+  let fallback = null;
+  for (const element of Array.from(elements)) {
+    if (element.getAttribute(OUTLINE_KEY_ATTRIBUTE) !== key) {
+      continue;
+    }
+    if (element.getClientRects().length > 0) {
+      return element;
+    }
+    fallback != null ? fallback : fallback = element;
+  }
+  return fallback;
+}
+var HeadingScroller = class {
+  constructor(app) {
+    this.app = app;
+    this.token = 0;
+  }
+  cancel() {
+    this.token += 1;
+  }
+  schedule(file, key, preferredView) {
+    if (!file) {
+      return;
+    }
+    const token = ++this.token;
+    let attempts = 0;
+    const tryScroll = () => {
+      if (token !== this.token) {
+        return;
+      }
+      const markdownView = (preferredView == null ? void 0 : preferredView.contentEl) ? preferredView : findMarkdownViewForFile(this.app, file);
+      const contentEl = markdownView == null ? void 0 : markdownView.contentEl;
+      if (contentEl) {
+        const heading = findHeadingElement(contentEl, key);
+        if (heading) {
+          heading.scrollIntoView({ block: "center", behavior: "smooth" });
+          return;
+        }
+      }
+      if (attempts++ < 40) {
+        window.setTimeout(tryScroll, 50);
+      }
+    };
+    window.setTimeout(tryScroll, 0);
+  }
+};
+
+// src/navigationBridge.ts
+function isObject(value) {
+  return typeof value === "object" && value !== null;
+}
+function asRecord(value) {
+  return value;
+}
+var HeadingNavigationBridge = class {
+  constructor(app, metadata) {
+    this.app = app;
+    this.metadata = metadata;
+    this.patches = [];
+    this.editorViews = /* @__PURE__ */ new WeakMap();
+    this.rendererViews = /* @__PURE__ */ new WeakMap();
+    this.docViews = /* @__PURE__ */ new WeakMap();
+    this.pending = /* @__PURE__ */ new Map();
+    this.active = false;
+    this.destroyed = false;
+    this.scroller = new HeadingScroller(app);
+  }
+  start() {
+    if (this.destroyed) {
+      return;
+    }
+    this.active = true;
+    this.patchAll();
+  }
+  stop() {
+    this.active = false;
+    this.scroller.cancel();
+    this.restoreAll();
+  }
+  destroy() {
+    this.stop();
+    this.destroyed = true;
+  }
+  onLayoutChange() {
+    this.patchAll();
+  }
+  refresh() {
+    this.patchAll();
+  }
+  onSettingsChanged() {
+    this.scroller.cancel();
+    this.patchAll();
+  }
+  patchAll() {
+    if (!this.active || this.destroyed) {
+      return false;
+    }
+    let changed = this.patchLeaf();
+    for (const view of this.getMarkdownViews()) {
+      changed = this.patchMarkdownView(view) || changed;
+      changed = this.patchEditor(view) || changed;
+      changed = this.patchRenderer(view) || changed;
+      changed = this.patchCodeMirror(view) || changed;
+    }
+    return changed;
+  }
+  patchLeaf() {
+    var _a;
+    const workspace = this.app.workspace;
+    let leaf = (_a = workspace.activeLeaf) != null ? _a : null;
+    if (!leaf && typeof workspace.iterateAllLeaves === "function") {
+      workspace.iterateAllLeaves((candidate) => {
+        leaf = leaf != null ? leaf : candidate;
+      });
+    }
+    if (!leaf) {
+      return false;
+    }
+    const integration = this;
+    return this.installOnPrototypeOrObject(
+      leaf,
+      "openFile",
+      (original) => {
+        return function(file, ...args) {
+          const result = original.call(this, file, ...args);
+          if (result && typeof result.then === "function") {
+            return result.then((value) => {
+              integration.flushPending(file);
+              return value;
+            });
+          }
+          integration.flushPending(file);
+          return result;
+        };
+      }
+    );
+  }
+  getMarkdownViews() {
+    const workspace = this.app.workspace;
+    const views = [];
+    const add = (leaf) => {
+      var _a;
+      const view = leaf == null ? void 0 : leaf.view;
+      if (view && ((_a = view.getViewType) == null ? void 0 : _a.call(view)) === "markdown") {
+        views.push(view);
+      }
+    };
+    if (typeof workspace.getLeavesOfType === "function") {
+      for (const leaf of workspace.getLeavesOfType("markdown")) {
+        add(leaf);
+      }
+    } else if (typeof workspace.iterateAllLeaves === "function") {
+      workspace.iterateAllLeaves(add);
+    }
+    return views;
+  }
+  patchMarkdownView(view) {
+    const integration = this;
+    return this.installOnPrototypeOrObject(
+      view,
+      "setEphemeralState",
+      (original) => {
+        return function(state, ...args) {
+          return integration.handleSetEphemeralState(
+            this,
+            original,
+            state,
+            args
+          );
+        };
+      }
+    );
+  }
+  patchEditor(view) {
+    const editor = this.getViewEditor(view);
+    if (!isObject(editor)) {
+      return false;
+    }
+    const integration = this;
+    this.editorViews.set(editor, view);
+    let changed = false;
+    changed = this.installOnPrototypeOrObject(editor, "offsetToPos", (original) => {
+      return function(offset, ...args) {
+        return integration.handleOffsetToPos(
+          this,
+          original,
+          offset,
+          args
+        );
+      };
+    }) || changed;
+    changed = this.installOnPrototypeOrObject(editor, "posToOffset", (original) => {
+      return function(pos, ...args) {
+        return integration.handlePosToOffset(this, original, pos, args);
+      };
+    }) || changed;
+    changed = this.installOnPrototypeOrObject(editor, "setCursor", (original) => {
+      return function(pos, ...args) {
+        return integration.handleSetCursor(this, original, pos, args);
+      };
+    }) || changed;
+    changed = this.installOnPrototypeOrObject(editor, "setSelection", (original) => {
+      return function(anchor, head, ...args) {
+        return integration.handleSetSelection(
+          this,
+          original,
+          anchor,
+          head,
+          args
+        );
+      };
+    }) || changed;
+    changed = this.installOnPrototypeOrObject(editor, "scrollIntoView", (original) => {
+      return function(range, ...args) {
+        return integration.handleScrollIntoView(
+          this,
+          original,
+          range,
+          args
+        );
+      };
+    }) || changed;
+    return changed;
+  }
+  patchRenderer(view) {
+    var _a;
+    let renderer;
+    try {
+      renderer = (_a = view.previewMode) == null ? void 0 : _a.renderer;
+    } catch (e) {
+      return false;
+    }
+    if (!isObject(renderer)) {
+      return false;
+    }
+    const integration = this;
+    this.rendererViews.set(renderer, view);
+    let changed = false;
+    for (const key of ["applyScroll", "applyScrollDelayed"]) {
+      changed = this.installOnPrototypeOrObject(renderer, key, (original) => {
+        return function(line, ...args) {
+          return integration.handleApplyScroll(
+            this,
+            original,
+            line,
+            args
+          );
+        };
+      }) || changed;
+    }
+    return changed;
+  }
+  patchCodeMirror(view) {
+    var _a, _b;
+    const editor = this.getViewEditor(view);
+    if (!isObject(editor)) {
+      return false;
+    }
+    let doc;
+    try {
+      doc = (_b = (_a = asRecord(editor).cm) == null ? void 0 : _a.state) == null ? void 0 : _b.doc;
+    } catch (e) {
+      return false;
+    }
+    if (!isObject(doc)) {
+      return false;
+    }
+    const integration = this;
+    this.docViews.set(doc, view);
+    return this.installOnPrototypeOrObject(doc, "line", (original) => {
+      return function(line, ...args) {
+        return integration.handleDocLine(this, original, line, args);
+      };
+    });
+  }
+  handleSetEphemeralState(view, original, state, args) {
+    let nextState = state;
+    const file = view.file;
+    if (this.active && file && isObject(state)) {
+      const record = asRecord(state);
+      let token = null;
+      if (typeof record.subpath === "string") {
+        token = this.metadata.resolveVirtualSubpath(file, record.subpath);
+        if (token) {
+          nextState = {
+            ...record,
+            subpath: void 0,
+            line: token.realLine,
+            cursor: { line: token.realLine, ch: 0 }
+          };
+        }
+      }
+      if (!token && typeof record.line === "number") {
+        token = this.resolveLine(file, record.line);
+        if (token) {
+          nextState = {
+            ...nextState,
+            line: token.realLine
+          };
+        }
+      }
+      if (isObject(record.cursor)) {
+        const mapped = this.mapPosition(file, record.cursor);
+        if (mapped.token) {
+          token = token != null ? token : mapped.token;
+          nextState = {
+            ...nextState,
+            cursor: mapped.position
+          };
+        }
+      }
+      if (token) {
+        this.rememberPending(token);
+      }
+      const result = original.call(view, nextState, ...args);
+      if (token) {
+        this.scroller.schedule(file, token.meta.key, view);
+      }
+      return result;
+    }
+    return original.call(view, nextState, ...args);
+  }
+  handleOffsetToPos(editor, original, offset, args) {
+    if (this.active && typeof offset === "number") {
+      const token = this.metadata.resolveVirtualOffset(offset);
+      if (token) {
+        this.rememberPending(token);
+        this.scroller.schedule(token.file, token.meta.key);
+        return { line: token.realLine, ch: 0 };
+      }
+    }
+    return original.call(editor, offset, ...args);
+  }
+  handlePosToOffset(editor, original, pos, args) {
+    if (this.active && isObject(pos)) {
+      const view = this.findViewForEditor(editor);
+      const file = view == null ? void 0 : view.file;
+      if (file) {
+        const line = asRecord(pos).line;
+        if (typeof line === "number") {
+          const token = this.resolveLine(file, line);
+          if (token) {
+            this.rememberPending(token);
+            this.scroller.schedule(file, token.meta.key);
+            return token.offset;
+          }
+        }
+      }
+    }
+    return original.call(editor, pos, ...args);
+  }
+  handleSetCursor(editor, original, pos, args) {
+    const view = this.findViewForEditor(editor);
+    const file = view == null ? void 0 : view.file;
+    if (this.active && file) {
+      if (typeof pos === "number") {
+        const token = this.resolveLine(file, pos);
+        if (token) {
+          this.rememberPending(token);
+          this.scroller.schedule(file, token.meta.key);
+          return original.call(
+            editor,
+            { line: token.realLine, ch: 0 },
+            ...args
+          );
+        }
+      } else if (isObject(pos)) {
+        const mapped = this.mapPosition(file, pos);
+        if (mapped.token) {
+          this.rememberPending(mapped.token);
+          this.scroller.schedule(file, mapped.token.meta.key);
+          return original.call(editor, mapped.position, ...args);
+        }
+      }
+    }
+    return original.call(editor, pos, ...args);
+  }
+  handleSetSelection(editor, original, anchor, head, args) {
+    var _a;
+    const view = this.findViewForEditor(editor);
+    const file = view == null ? void 0 : view.file;
+    if (this.active && file) {
+      const anchorMapped = isObject(anchor) ? this.mapPosition(file, anchor) : { position: anchor, token: null };
+      const headMapped = isObject(head) ? this.mapPosition(file, head) : { position: head, token: null };
+      const token = (_a = anchorMapped.token) != null ? _a : headMapped.token;
+      if (token) {
+        this.rememberPending(token);
+        this.scroller.schedule(file, token.meta.key);
+        return original.call(
+          editor,
+          anchorMapped.position,
+          headMapped.position,
+          ...args
+        );
+      }
+    }
+    return original.call(editor, anchor, head, ...args);
+  }
+  handleScrollIntoView(editor, original, range, args) {
+    var _a;
+    const view = this.findViewForEditor(editor);
+    const file = view == null ? void 0 : view.file;
+    if (this.active && file && isObject(range)) {
+      const record = asRecord(range);
+      const fromMapped = isObject(record.from) ? this.mapPosition(file, record.from) : { position: record.from, token: null };
+      const toMapped = isObject(record.to) ? this.mapPosition(file, record.to) : { position: record.to, token: null };
+      const token = (_a = fromMapped.token) != null ? _a : toMapped.token;
+      if (token) {
+        this.rememberPending(token);
+        this.scroller.schedule(file, token.meta.key);
+        return original.call(
+          editor,
+          { ...record, from: fromMapped.position, to: toMapped.position },
+          ...args
+        );
+      }
+    }
+    return original.call(editor, range, ...args);
+  }
+  handleApplyScroll(renderer, original, line, args) {
+    var _a;
+    const view = (_a = this.rendererViews.get(renderer)) != null ? _a : this.findViewForRenderer(renderer);
+    const file = view == null ? void 0 : view.file;
+    if (this.active && file && typeof line === "number") {
+      const token = this.resolveLine(file, line);
+      if (token) {
+        this.rememberPending(token);
+        const result = original.call(renderer, token.realLine, ...args);
+        this.scroller.schedule(file, token.meta.key, view);
+        return result;
+      }
+    }
+    return original.call(renderer, line, ...args);
+  }
+  handleDocLine(doc, original, line, args) {
+    var _a;
+    const view = (_a = this.docViews.get(doc)) != null ? _a : this.findViewForDoc(doc);
+    const file = view == null ? void 0 : view.file;
+    if (this.active && file && typeof line === "number" && !Number.isInteger(line)) {
+      const token = this.resolveLine(file, line);
+      if (token) {
+        this.rememberPending(token);
+        this.scroller.schedule(file, token.meta.key);
+        return original.call(doc, token.realLine + 1, ...args);
+      }
+    }
+    return original.call(doc, line, ...args);
+  }
+  mapPosition(file, position) {
+    const record = asRecord(position);
+    const line = record.line;
+    if (typeof line !== "number") {
+      return { position, token: null };
+    }
+    const token = this.resolveLine(file, line);
+    if (!token) {
+      return { position, token: null };
+    }
+    return {
+      position: { ...record, line: token.realLine, ch: 0 },
+      token
+    };
+  }
+  resolveLine(file, line) {
+    var _a;
+    return (_a = this.metadata.resolveVirtualLine(file, line)) != null ? _a : this.metadata.resolveVirtualLine(file, line - 1);
+  }
+  /**
+   * Offset navigation often finishes with `leaf.openFile(..., { eState })`,
+   * which scrolls to the embed line after our first scroll request. Keep the
+   * target briefly so the leaf wrapper can re-apply the exact scroll after the
+   * file has finished opening.
+   */
+  rememberPending(token) {
+    const now = Date.now();
+    for (const [path, pending] of this.pending) {
+      if (now - pending.at > 5e3) {
+        this.pending.delete(path);
+      }
+    }
+    this.pending.set(token.filePath, { token, at: now });
+  }
+  flushPending(file) {
+    const path = typeof file === "string" ? file : isObject(file) && typeof asRecord(file).path === "string" ? asRecord(file).path : null;
+    if (!path) {
+      return;
+    }
+    const pending = this.pending.get(path);
+    if (!pending) {
+      return;
+    }
+    this.pending.delete(path);
+    if (Date.now() - pending.at <= 5e3) {
+      this.scroller.schedule(pending.token.file, pending.token.meta.key);
+    }
+  }
+  getViewEditor(view) {
+    var _a, _b, _c;
+    try {
+      return (_b = view.editor) != null ? _b : (_a = view.editMode) == null ? void 0 : _a.editor;
+    } catch (e) {
+      return (_c = view.editMode) == null ? void 0 : _c.editor;
+    }
+  }
+  findViewForEditor(editor) {
+    const cached = this.editorViews.get(editor);
+    if (cached) {
+      return cached;
+    }
+    for (const view of this.getMarkdownViews()) {
+      const candidate = this.getViewEditor(view);
+      if (candidate === editor) {
+        this.editorViews.set(editor, view);
+        return view;
+      }
+    }
+    return null;
+  }
+  findViewForRenderer(renderer) {
+    var _a;
+    const cached = this.rendererViews.get(renderer);
+    if (cached) {
+      return cached;
+    }
+    for (const view of this.getMarkdownViews()) {
+      try {
+        if (((_a = view.previewMode) == null ? void 0 : _a.renderer) === renderer) {
+          this.rendererViews.set(renderer, view);
+          return view;
+        }
+      } catch (e) {
+      }
+    }
+    return null;
+  }
+  findViewForDoc(doc) {
+    var _a, _b;
+    for (const view of this.getMarkdownViews()) {
+      const editor = this.getViewEditor(view);
+      if (!isObject(editor)) {
+        continue;
+      }
+      try {
+        if (((_b = (_a = asRecord(editor).cm) == null ? void 0 : _a.state) == null ? void 0 : _b.doc) === doc) {
+          this.docViews.set(doc, view);
+          return view;
+        }
+      } catch (e) {
+      }
+    }
+    return null;
+  }
+  installOnPrototypeOrObject(target, key, createWrapper) {
+    if (Object.prototype.hasOwnProperty.call(target, key) && typeof Reflect.get(target, key) === "function") {
+      return this.installMethod(target, key, createWrapper);
+    }
+    const prototype = Object.getPrototypeOf(target);
+    if (prototype && typeof Reflect.get(prototype, key) === "function") {
+      return this.installMethod(prototype, key, createWrapper);
+    }
+    if (typeof Reflect.get(target, key) === "function") {
+      return this.installMethod(target, key, createWrapper);
+    }
+    return false;
+  }
+  hasPatch(target, key) {
+    return this.patches.some(
+      (patch) => patch.target === target && patch.key === key
+    );
+  }
+  installMethod(target, key, createWrapper) {
+    if (this.hasPatch(target, key)) {
+      return false;
+    }
+    const original = Reflect.get(target, key);
+    if (typeof original !== "function") {
+      return false;
+    }
+    const hadOwn = Object.prototype.hasOwnProperty.call(target, key);
+    const wrapper = createWrapper(original);
+    if (!Reflect.set(target, key, wrapper)) {
+      return false;
+    }
+    this.patches.push({ target, key, hadOwn, original, wrapper });
+    return true;
+  }
+  restoreAll() {
+    for (let index = this.patches.length - 1; index >= 0; index--) {
+      const patch = this.patches[index];
+      if (Reflect.get(patch.target, patch.key) !== patch.wrapper) {
+        continue;
+      }
+      if (patch.hadOwn) {
+        Reflect.set(patch.target, patch.key, patch.original);
+      } else {
+        Reflect.deleteProperty(patch.target, patch.key);
+      }
+    }
+    this.patches.length = 0;
+  }
+};
+
 // src/outline.ts
 function decorateItem(item) {
   if (!(item == null ? void 0 : item.selfEl)) {
@@ -361,9 +1380,9 @@ var OutlineIntegration = class {
     this.getSettings = getSettings;
     this.patches = /* @__PURE__ */ new Map();
     this.refreshFrame = null;
-    this.scrollToken = 0;
     this.active = false;
     this.destroyed = false;
+    this.scroller = new HeadingScroller(app);
   }
   start() {
     if (this.destroyed || !this.getSettings().enabled) {
@@ -376,7 +1395,7 @@ var OutlineIntegration = class {
   stop() {
     var _a;
     this.active = false;
-    this.scrollToken += 1;
+    this.scroller.cancel();
     if (this.refreshFrame !== null) {
       window.cancelAnimationFrame(this.refreshFrame);
       this.refreshFrame = null;
@@ -502,12 +1521,16 @@ var OutlineIntegration = class {
     const ownFindActiveHeading = view.findActiveHeading;
     const boundFindActiveHeading = typeof ownFindActiveHeading === "function" ? ownFindActiveHeading.bind(view) : null;
     const metaByKey = /* @__PURE__ */ new Map();
-    const getHeadings = () => {
-      let fallback = [];
+    const useFallbackHeadings = () => {
       try {
         const original = boundGetHeadings();
         if (Array.isArray(original)) {
-          fallback = original;
+          for (const heading of original) {
+            if (heading.aeih) {
+              metaByKey.set(heading.aeih.key, heading.aeih);
+            }
+          }
+          return original;
         }
       } catch (error) {
         console.error(
@@ -515,18 +1538,21 @@ var OutlineIntegration = class {
           error
         );
       }
+      return [];
+    };
+    const getHeadings = () => {
       metaByKey.clear();
       if (!this.active || !this.getSettings().enabled) {
-        return fallback;
+        return useFallbackHeadings();
       }
       const file = view.file;
       if (!file || file.extension !== "md") {
-        return fallback;
+        return useFallbackHeadings();
       }
       try {
         const fileData = getFileData(this.app, file);
         if (!fileData) {
-          return fallback;
+          return useFallbackHeadings();
         }
         const combined = buildOutlineHeadings(fileData, (path, sourcePath) => {
           try {
@@ -551,7 +1577,7 @@ var OutlineIntegration = class {
           "Seamless Note Embed: failed to build the outline",
           error
         );
-        return fallback;
+        return useFallbackHeadings();
       }
     };
     const update = () => {
@@ -584,7 +1610,7 @@ var OutlineIntegration = class {
       if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
         return;
       }
-      this.scrollToken += 1;
+      this.scroller.cancel();
       const element = event.target;
       if (!element || typeof element.closest !== "function") {
         return;
@@ -675,63 +1701,10 @@ var OutlineIntegration = class {
     }
   }
   scheduleScrollToHeading(view, meta) {
-    const file = view.file;
-    if (!file) {
+    if (!this.active) {
       return;
     }
-    const token = ++this.scrollToken;
-    let attempts = 0;
-    const tryScroll = () => {
-      if (!this.active || token !== this.scrollToken) {
-        return;
-      }
-      const markdownView = this.findMarkdownViewForFile(file);
-      const contentEl = markdownView == null ? void 0 : markdownView.contentEl;
-      if (contentEl) {
-        const heading = this.findHeadingElement(contentEl, meta.key);
-        if (heading) {
-          heading.scrollIntoView({ block: "center", behavior: "smooth" });
-          return;
-        }
-      }
-      if (attempts++ < 40) {
-        window.setTimeout(tryScroll, 50);
-      }
-    };
-    window.setTimeout(tryScroll, 0);
-  }
-  findMarkdownViewForFile(file) {
-    var _a;
-    const activeView = (_a = this.app.workspace.activeLeaf) == null ? void 0 : _a.view;
-    if (activeView && this.isMarkdownViewForFile(activeView, file)) {
-      return activeView;
-    }
-    let match = null;
-    this.app.workspace.iterateAllLeaves((leaf) => {
-      if (match) {
-        return;
-      }
-      const view = leaf.view;
-      if (this.isMarkdownViewForFile(view, file)) {
-        match = view;
-      }
-    });
-    return match;
-  }
-  isMarkdownViewForFile(view, file) {
-    var _a, _b;
-    return !!view && ((_a = view.getViewType) == null ? void 0 : _a.call(view)) === "markdown" && ((_b = view.file) == null ? void 0 : _b.path) === file.path;
-  }
-  findHeadingElement(container, key) {
-    const elements = container.querySelectorAll(
-      `[${OUTLINE_KEY_ATTRIBUTE}]`
-    );
-    for (const element of Array.from(elements)) {
-      if (element.getAttribute(OUTLINE_KEY_ATTRIBUTE) === key) {
-        return element;
-      }
-    }
-    return null;
+    this.scroller.schedule(view.file, meta.key);
   }
 };
 
@@ -1397,6 +2370,370 @@ var EmbedHeadingProcessor = class {
   }
 };
 
+// src/thirdPartyOutlines.ts
+function isThenable(value) {
+  return !!value && typeof value.then === "function";
+}
+function isQuietMarkdownNavigator(navigator) {
+  var _a;
+  const id = (_a = navigator.getId) == null ? void 0 : _a.call(navigator);
+  return !id || id === "markdown" || id === "embed-markdown-file";
+}
+function quietMeta(navigator, index) {
+  var _a;
+  if (!isQuietMarkdownNavigator(navigator) || typeof index !== "number" || !navigator.__aeihHeaders) {
+    return void 0;
+  }
+  return (_a = navigator.__aeihHeaders[index]) == null ? void 0 : _a.aeih;
+}
+var ThirdPartyOutlineIntegration = class {
+  constructor(app, metadata) {
+    this.app = app;
+    this.metadata = metadata;
+    this.methodPatches = [];
+    this.patchedQuietPlugins = /* @__PURE__ */ new WeakSet();
+    this.patchedSubtlePlugins = /* @__PURE__ */ new WeakSet();
+    this.active = false;
+    this.destroyed = false;
+  }
+  start() {
+    if (this.destroyed) {
+      return;
+    }
+    this.active = true;
+    this.patchAll();
+    this.refreshPlugins();
+  }
+  stop() {
+    this.active = false;
+    this.restoreAll();
+    this.patchedQuietPlugins = /* @__PURE__ */ new WeakSet();
+    this.patchedSubtlePlugins = /* @__PURE__ */ new WeakSet();
+    this.refreshPlugins();
+  }
+  destroy() {
+    this.stop();
+    this.destroyed = true;
+  }
+  onLayoutChange() {
+    if (this.patchAll()) {
+      this.refreshPlugins();
+    }
+  }
+  onSettingsChanged() {
+    this.patchAll();
+    this.refreshPlugins();
+  }
+  /** Re-read headings after metadata changes, including target-note changes. */
+  refresh() {
+    this.patchAll();
+    this.refreshPlugins();
+  }
+  patchAll() {
+    if (this.destroyed || !this.active) {
+      return false;
+    }
+    let changed = false;
+    const quiet = this.getPlugin("obsidian-quiet-outline");
+    if (quiet) {
+      changed = this.patchQuietPlugin(quiet) || changed;
+    }
+    const subtle = this.getPlugin("subtle-toc");
+    if (subtle) {
+      changed = this.patchSubtlePlugin(subtle) || changed;
+    }
+    return changed;
+  }
+  getPlugin(id) {
+    var _a, _b;
+    const app = this.app;
+    const plugin = (_b = (_a = app.plugins) == null ? void 0 : _a.plugins) == null ? void 0 : _b[id];
+    return plugin && typeof plugin === "object" ? plugin : null;
+  }
+  patchQuietPlugin(plugin) {
+    const key = plugin;
+    if (this.patchedQuietPlugins.has(key)) {
+      return false;
+    }
+    this.patchedQuietPlugins.add(key);
+    let changed = false;
+    if (plugin.navigator) {
+      changed = this.patchQuietNavigator(plugin.navigator) || changed;
+    }
+    const integration = this;
+    const patchAfterUpdate = (original) => {
+      return async function(...args) {
+        const result = await original.apply(this, args);
+        if (integration.active) {
+          integration.patchQuietNavigatorFromPlugin(this);
+        }
+        return result;
+      };
+    };
+    changed = this.installMethod(plugin, "updateNav", patchAfterUpdate) || changed;
+    changed = this.installMethod(
+      plugin,
+      "updateNavAndRefresh",
+      patchAfterUpdate
+    ) || changed;
+    return changed;
+  }
+  patchQuietNavigatorFromPlugin(plugin) {
+    if (plugin.navigator) {
+      this.patchQuietNavigator(plugin.navigator);
+    }
+  }
+  patchQuietNavigator(navigator) {
+    var _a, _b;
+    const file = (_a = navigator.view) == null ? void 0 : _a.file;
+    if (!file || file.extension !== "md") {
+      return false;
+    }
+    const id = (_b = navigator.getId) == null ? void 0 : _b.call(navigator);
+    if (id && id !== "markdown" && id !== "embed-markdown-file") {
+      return false;
+    }
+    const prototype = Object.getPrototypeOf(navigator);
+    if (!prototype || this.hasPatch(prototype, "getHeaders")) {
+      return false;
+    }
+    const integration = this;
+    if (!this.installMethod(prototype, "getHeaders", (original) => {
+      return function(...args) {
+        const result = original.apply(this, args);
+        if (!integration.active || !isQuietMarkdownNavigator(this)) {
+          return result;
+        }
+        if (isThenable(result)) {
+          return Promise.resolve(result).then(
+            (headers) => integration.attachQuietHeaders(this, headers)
+          );
+        }
+        return integration.attachQuietHeaders(this, result);
+      };
+    })) {
+      return false;
+    }
+    this.installMethod(prototype, "onRightClick", (original) => {
+      return function(index, ...args) {
+        if (integration.active && quietMeta(this, index)) {
+          return void 0;
+        }
+        return original.call(this, index, ...args);
+      };
+    });
+    this.installMethod(prototype, "handleDrop", (original) => {
+      return function(sourceIndex, targetIndex, ...args) {
+        if (integration.active && (quietMeta(this, sourceIndex) || quietMeta(this, targetIndex))) {
+          return void 0;
+        }
+        return original.call(this, sourceIndex, targetIndex, ...args);
+      };
+    });
+    return true;
+  }
+  attachQuietHeaders(navigator, headers) {
+    var _a, _b;
+    if (!Array.isArray(headers)) {
+      return headers;
+    }
+    const file = (_a = navigator.view) == null ? void 0 : _a.file;
+    if (!file || file.extension !== "md") {
+      return headers;
+    }
+    const headerArray = headers;
+    try {
+      const combined = this.metadata.getCombinedHeadings(file);
+      if (combined && combined.length === headerArray.length) {
+        for (let index = 0; index < headerArray.length; index++) {
+          const meta = (_b = combined[index]) == null ? void 0 : _b.aeih;
+          if (meta) {
+            headerArray[index].aeih = meta;
+          }
+        }
+      }
+      navigator.__aeihHeaders = headerArray;
+    } catch (error) {
+      console.error(
+        "Seamless Note Embed: failed to attach Quiet Outline metadata",
+        error
+      );
+    }
+    return headerArray;
+  }
+  patchSubtlePlugin(plugin) {
+    const key = plugin;
+    if (this.patchedSubtlePlugins.has(key)) {
+      return false;
+    }
+    this.patchedSubtlePlugins.add(key);
+    let changed = false;
+    if (plugin.overlay) {
+      changed = this.patchSubtleOverlay(plugin.overlay) || changed;
+    }
+    const integration = this;
+    changed = this.installMethod(plugin, "sync", (original) => {
+      return function(...args) {
+        const result = original.apply(this, args);
+        if (integration.active) {
+          integration.patchSubtleOverlay(this.overlay);
+        }
+        return result;
+      };
+    }) || changed;
+    return changed;
+  }
+  patchSubtleOverlay(overlay) {
+    if (!overlay) {
+      return false;
+    }
+    const prototype = Object.getPrototypeOf(overlay);
+    if (!prototype || this.hasPatch(prototype, "refresh")) {
+      return false;
+    }
+    const integration = this;
+    if (!this.installMethod(prototype, "refresh", (original) => {
+      return function(...args) {
+        var _a;
+        const result = original.apply(this, args);
+        if (!integration.active) {
+          return result;
+        }
+        integration.attachSubtleMeta(this);
+        (_a = this.updateActive) == null ? void 0 : _a.call(this);
+        return result;
+      };
+    })) {
+      return false;
+    }
+    this.installMethod(prototype, "updateActive", (original) => {
+      return function(...args) {
+        var _a, _b;
+        const result = original.apply(this, args);
+        const headings = this.headings;
+        if (integration.active && Array.isArray(headings) && typeof this.activeIndex === "number" && this.activeIndex >= 0 && ((_a = headings[this.activeIndex]) == null ? void 0 : _a.aeih)) {
+          let index = this.activeIndex - 1;
+          while (index >= 0 && ((_b = headings[index]) == null ? void 0 : _b.aeih)) {
+            index--;
+          }
+          if (typeof this.setActive === "function") {
+            try {
+              this.setActive(index);
+            } catch (error) {
+              console.error(
+                "Seamless Note Embed: failed to update the Subtle TOC active heading",
+                error
+              );
+            }
+          }
+        }
+        return result;
+      };
+    });
+    return true;
+  }
+  attachSubtleMeta(overlay) {
+    var _a, _b, _c, _d;
+    const file = (_a = overlay.view) == null ? void 0 : _a.file;
+    if (!file || file.extension !== "md") {
+      return;
+    }
+    const combined = this.metadata.getCombinedHeadings(file);
+    if (!combined || !Array.isArray(overlay.headings)) {
+      return;
+    }
+    const settings = overlay.settings;
+    if ((settings == null ? void 0 : settings.show) === "tasks") {
+      return;
+    }
+    const minLevel = (_b = settings == null ? void 0 : settings.minLevel) != null ? _b : 1;
+    const maxLevel = (_c = settings == null ? void 0 : settings.maxLevel) != null ? _c : 6;
+    const filtered = combined.filter(
+      (heading) => heading.level >= minLevel && heading.level <= maxLevel
+    );
+    if (filtered.length !== overlay.headings.length) {
+      return;
+    }
+    try {
+      for (let index = 0; index < overlay.headings.length; index++) {
+        const meta = (_d = filtered[index]) == null ? void 0 : _d.aeih;
+        if (meta) {
+          overlay.headings[index].aeih = meta;
+        }
+      }
+    } catch (error) {
+      console.error(
+        "Seamless Note Embed: failed to attach Subtle TOC metadata",
+        error
+      );
+    }
+  }
+  refreshPlugins() {
+    const quiet = this.getPlugin("obsidian-quiet-outline");
+    if (quiet) {
+      try {
+        if (typeof quiet.refresh === "function") {
+          quiet.refresh();
+        } else if (typeof quiet.refresh_outline === "function") {
+          quiet.refresh_outline("file-modify");
+        }
+      } catch (error) {
+        console.error(
+          "Seamless Note Embed: failed to refresh Quiet Outline",
+          error
+        );
+      }
+    }
+    const subtle = this.getPlugin("subtle-toc");
+    if (subtle) {
+      try {
+        if (subtle.overlay && typeof subtle.overlay.refresh === "function") {
+          subtle.overlay.refresh();
+        } else if (typeof subtle.sync === "function") {
+          subtle.sync();
+        }
+      } catch (error) {
+        console.error(
+          "Seamless Note Embed: failed to refresh Subtle TOC",
+          error
+        );
+      }
+    }
+  }
+  hasPatch(target, key) {
+    return this.methodPatches.some(
+      (patch) => patch.target === target && patch.key === key
+    );
+  }
+  installMethod(target, key, createWrapper) {
+    const original = Reflect.get(target, key);
+    if (typeof original !== "function") {
+      return false;
+    }
+    const hadOwn = Object.prototype.hasOwnProperty.call(target, key);
+    const wrapper = createWrapper(original);
+    if (!Reflect.set(target, key, wrapper)) {
+      return false;
+    }
+    this.methodPatches.push({ target, key, hadOwn, original, wrapper });
+    return true;
+  }
+  restoreAll() {
+    for (let index = this.methodPatches.length - 1; index >= 0; index--) {
+      const patch = this.methodPatches[index];
+      if (Reflect.get(patch.target, patch.key) !== patch.wrapper) {
+        continue;
+      }
+      if (patch.hadOwn) {
+        Reflect.set(patch.target, patch.key, patch.original);
+      } else {
+        Reflect.deleteProperty(patch.target, patch.key);
+      }
+    }
+    this.methodPatches.length = 0;
+  }
+};
+
 // src/settings.ts
 var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
@@ -1544,9 +2881,24 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
   async onload() {
     await this.loadSettings();
     this.applyAppearanceSettings();
+    this.metadataHeadings = new MetadataHeadingIntegration(
+      this.app,
+      () => this.settings
+    );
+    this.metadataHeadings.start();
+    this.navigationBridge = new HeadingNavigationBridge(
+      this.app,
+      this.metadataHeadings
+    );
+    this.navigationBridge.start();
     this.processor = new EmbedHeadingProcessor(this.app, () => this.settings);
     this.outline = new OutlineIntegration(this.app, () => this.settings);
     this.outline.start();
+    this.thirdPartyOutlines = new ThirdPartyOutlineIntegration(
+      this.app,
+      this.metadataHeadings
+    );
+    this.thirdPartyOutlines.start();
     this.registerMarkdownPostProcessor((element) => {
       if (!this.settings.enabled) {
         return;
@@ -1559,31 +2911,69 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
         this.processor.refreshAll();
+        this.navigationBridge.onLayoutChange();
         this.outline.onLayoutChange();
+        this.thirdPartyOutlines.onLayoutChange();
       })
     );
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", () => {
         this.processor.refreshAll();
+        this.navigationBridge.onLayoutChange();
         this.outline.refresh();
+        this.thirdPartyOutlines.onLayoutChange();
       })
     );
     this.registerEvent(
       this.app.workspace.on("file-open", () => {
         this.processor.refreshAll();
+        this.navigationBridge.onLayoutChange();
         this.outline.refresh();
+        this.thirdPartyOutlines.onLayoutChange();
       })
     );
     this.registerEvent(
       this.app.metadataCache.on("changed", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
         this.processor.refreshAll();
         this.outline.refresh();
+        this.thirdPartyOutlines.refresh();
       })
     );
     this.registerEvent(
       this.app.metadataCache.on("resolved", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
         this.processor.refreshAll();
         this.outline.refresh();
+        this.thirdPartyOutlines.refresh();
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("modify", () => {
+        this.metadataHeadings.refresh();
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("create", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
+        this.thirdPartyOutlines.refresh();
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("delete", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
+        this.thirdPartyOutlines.refresh();
+      })
+    );
+    this.registerEvent(
+      this.app.vault.on("rename", () => {
+        this.metadataHeadings.refresh();
+        this.navigationBridge.refresh();
+        this.thirdPartyOutlines.refresh();
       })
     );
     this.registerEvent(
@@ -1603,15 +2993,20 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
     this.addSettingTab(new AutoIncrementedEmbedHeadingsSettingTab(this.app, this));
     this.app.workspace.onLayoutReady(() => {
       this.processor.refreshAll();
+      this.navigationBridge.onLayoutChange();
       this.outline.onLayoutChange();
+      this.thirdPartyOutlines.onLayoutChange();
     });
   }
   onunload() {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e, _f;
     this.clearAppearanceSettings();
-    (_a = this.outline) == null ? void 0 : _a.destroy();
-    (_b = this.processor) == null ? void 0 : _b.restoreAll();
-    (_c = this.processor) == null ? void 0 : _c.destroy();
+    (_a = this.navigationBridge) == null ? void 0 : _a.destroy();
+    (_b = this.metadataHeadings) == null ? void 0 : _b.destroy();
+    (_c = this.thirdPartyOutlines) == null ? void 0 : _c.destroy();
+    (_d = this.outline) == null ? void 0 : _d.destroy();
+    (_e = this.processor) == null ? void 0 : _e.restoreAll();
+    (_f = this.processor) == null ? void 0 : _f.destroy();
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -1624,9 +3019,12 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
    * again. Used when a setting changes or the user asks for a manual refresh.
    */
   refreshHeadingLevels() {
+    this.metadataHeadings.refresh();
+    this.navigationBridge.refresh();
     this.processor.restoreAll();
     this.processor.refreshAll();
     this.outline.refresh();
+    this.thirdPartyOutlines.refresh();
   }
   /**
    * Apply the CSS-only appearance options. These are intentionally separate
@@ -1692,7 +3090,10 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
   }
   reapplySettings() {
     this.applyAppearanceSettings();
+    this.metadataHeadings.onSettingsChanged();
+    this.navigationBridge.onSettingsChanged();
     this.refreshHeadingLevels();
     this.outline.onSettingsChanged();
+    this.thirdPartyOutlines.onSettingsChanged();
   }
 };

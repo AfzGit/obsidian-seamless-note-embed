@@ -1,5 +1,6 @@
 import type { App, EmbedCache, HeadingCache, TFile } from "obsidian";
 import { resolveHeadingSubpath, splitLinktext } from "./embedTargets";
+import { getRawFileCache } from "./rawMetadata";
 
 /** Metadata needed to render or outline one embedded note. */
 export interface EmbedData {
@@ -21,7 +22,7 @@ export function getFileData(app: App, file: TFile): EmbedData | null {
     return null;
   }
 
-  const cache = app.metadataCache.getFileCache(file);
+  const cache = getRawFileCache(app, file);
   if (!cache) {
     return null;
   }
