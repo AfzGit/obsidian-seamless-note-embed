@@ -156,7 +156,7 @@ export class EmbedHeadingProcessor {
       try {
         this.refresh(root);
       } catch (error) {
-        console.error("Auto-Incremented Embed Headings: failed to update a note", error);
+        console.error("Seamless Note Embed: failed to update a note", error);
       }
     });
     this.frames.set(root, frame);
@@ -398,7 +398,7 @@ export class EmbedHeadingProcessor {
         }
       } catch (error) {
         console.error(
-          "Auto-Incremented Embed Headings: failed to resolve an embedded note",
+          "Seamless Note Embed: failed to resolve an embedded note",
           error,
         );
       }

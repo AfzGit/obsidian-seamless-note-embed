@@ -390,7 +390,7 @@ var OutlineIntegration = class {
       try {
         (_a = view.update) == null ? void 0 : _a.call(view);
       } catch (error) {
-        console.error("Auto-Incremented Embed Headings: failed to refresh the outline", error);
+        console.error("Seamless Note Embed: failed to refresh the outline", error);
       }
     }
   }
@@ -435,7 +435,7 @@ var OutlineIntegration = class {
         try {
           (_a = view.update) == null ? void 0 : _a.call(view);
         } catch (error) {
-          console.error("Auto-Incremented Embed Headings: failed to refresh the outline", error);
+          console.error("Seamless Note Embed: failed to refresh the outline", error);
         }
       }
     });
@@ -465,7 +465,7 @@ var OutlineIntegration = class {
           view.update();
         } catch (error) {
           console.error(
-            "Auto-Incremented Embed Headings: failed to refresh the outline",
+            "Seamless Note Embed: failed to refresh the outline",
             error
           );
         }
@@ -511,7 +511,7 @@ var OutlineIntegration = class {
         }
       } catch (error) {
         console.error(
-          "Auto-Incremented Embed Headings: the core outline could not read its headings",
+          "Seamless Note Embed: the core outline could not read its headings",
           error
         );
       }
@@ -534,7 +534,7 @@ var OutlineIntegration = class {
             return targetFile ? getFileData(this.app, targetFile) : null;
           } catch (error) {
             console.error(
-              "Auto-Incremented Embed Headings: failed to resolve an embed for the outline",
+              "Seamless Note Embed: failed to resolve an embed for the outline",
               error
             );
             return null;
@@ -548,7 +548,7 @@ var OutlineIntegration = class {
         return combined;
       } catch (error) {
         console.error(
-          "Auto-Incremented Embed Headings: failed to build the outline",
+          "Seamless Note Embed: failed to build the outline",
           error
         );
         return fallback;
@@ -884,7 +884,7 @@ var EmbedHeadingProcessor = class {
       try {
         this.refresh(root);
       } catch (error) {
-        console.error("Auto-Incremented Embed Headings: failed to update a note", error);
+        console.error("Seamless Note Embed: failed to update a note", error);
       }
     });
     this.frames.set(root, frame);
@@ -1066,7 +1066,7 @@ var EmbedHeadingProcessor = class {
         }
       } catch (error) {
         console.error(
-          "Auto-Incremented Embed Headings: failed to resolve an embedded note",
+          "Seamless Note Embed: failed to resolve an embedded note",
           error
         );
       }
@@ -1405,6 +1405,9 @@ var DEFAULT_SETTINGS = {
   hideEmbedLine: false,
   hideEmbedIndent: false,
   hideEmbedTitle: false,
+  hideEmbedScrollbar: false,
+  hideEmbedOpenButton: false,
+  removeEmbedLimit: false,
   justifyPreviewText: false
 };
 var AutoIncrementedEmbedHeadingsSettingTab = class extends import_obsidian.PluginSettingTab {
@@ -1415,7 +1418,7 @@ var AutoIncrementedEmbedHeadingsSettingTab = class extends import_obsidian.Plugi
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: "Auto-incremented embed headings" });
+    containerEl.createEl("h2", { text: "Seamless Note Embed" });
     new import_obsidian.Setting(containerEl).setName("Enable heading level shifting").setDesc(
       "Shift the headings of embedded notes so they nest under the heading that contains the embed."
     ).addToggle(
@@ -1467,6 +1470,33 @@ var AutoIncrementedEmbedHeadingsSettingTab = class extends import_obsidian.Plugi
         this.plugin.applyAppearanceSettings();
       })
     );
+    new import_obsidian.Setting(containerEl).setName("Hide embed scrollbar").setDesc(
+      "Hide the scrollbar on the right side of embedded notes while keeping them scrollable with the mouse wheel or trackpad. Hover previews are unaffected."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.hideEmbedScrollbar).onChange(async (value) => {
+        this.plugin.settings.hideEmbedScrollbar = value;
+        await this.plugin.saveSettings();
+        this.plugin.applyAppearanceSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Hide embed open-note button").setDesc(
+      "Hide the open-note button in the top-right corner of embedded notes. Hover previews are unaffected."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.hideEmbedOpenButton).onChange(async (value) => {
+        this.plugin.settings.hideEmbedOpenButton = value;
+        await this.plugin.saveSettings();
+        this.plugin.applyAppearanceSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Remove embed height limit").setDesc(
+      "Let long embedded notes expand to their full height in Reading View and Live Preview instead of stopping at Obsidian's height limit. Hover previews are unaffected."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.removeEmbedLimit).onChange(async (value) => {
+        this.plugin.settings.removeEmbedLimit = value;
+        await this.plugin.saveSettings();
+        this.plugin.applyAppearanceSettings();
+      })
+    );
     new import_obsidian.Setting(containerEl).setName("Justify text in Reading View").setDesc(
       "Justify paragraphs, list items, table cells, and blockquotes in Reading View, including text inside embedded notes."
     ).addToggle(
@@ -1492,6 +1522,18 @@ var APPEARANCE_OPTIONS = {
   hideEmbedTitle: {
     className: "aeih-hide-embed-title",
     printFlag: "--aeih-print-hide-embed-title"
+  },
+  hideEmbedScrollbar: {
+    className: "aeih-hide-embed-scrollbar",
+    printFlag: "--aeih-print-hide-embed-scrollbar"
+  },
+  hideEmbedOpenButton: {
+    className: "aeih-hide-embed-open-button",
+    printFlag: "--aeih-print-hide-embed-open-button"
+  },
+  removeEmbedLimit: {
+    className: "aeih-remove-embed-limit",
+    printFlag: "--aeih-print-remove-embed-limit"
   },
   justifyPreviewText: {
     className: "aeih-justify-preview",
@@ -1609,6 +1651,21 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
       body,
       APPEARANCE_OPTIONS.hideEmbedTitle,
       this.settings.hideEmbedTitle
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.hideEmbedScrollbar,
+      this.settings.hideEmbedScrollbar
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.hideEmbedOpenButton,
+      this.settings.hideEmbedOpenButton
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.removeEmbedLimit,
+      this.settings.removeEmbedLimit
     );
     this.applyAppearanceOption(
       body,

@@ -140,7 +140,7 @@ export class OutlineIntegration {
       try {
         view.update?.();
       } catch (error) {
-        console.error("Auto-Incremented Embed Headings: failed to refresh the outline", error);
+        console.error("Seamless Note Embed: failed to refresh the outline", error);
       }
     }
   }
@@ -194,7 +194,7 @@ export class OutlineIntegration {
         try {
           view.update?.();
         } catch (error) {
-          console.error("Auto-Incremented Embed Headings: failed to refresh the outline", error);
+          console.error("Seamless Note Embed: failed to refresh the outline", error);
         }
       }
     });
@@ -236,7 +236,7 @@ export class OutlineIntegration {
           view.update();
         } catch (error) {
           console.error(
-            "Auto-Incremented Embed Headings: failed to refresh the outline",
+            "Seamless Note Embed: failed to refresh the outline",
             error,
           );
         }
@@ -295,7 +295,7 @@ export class OutlineIntegration {
         }
       } catch (error) {
         console.error(
-          "Auto-Incremented Embed Headings: the core outline could not read its headings",
+          "Seamless Note Embed: the core outline could not read its headings",
           error,
         );
       }
@@ -323,7 +323,7 @@ export class OutlineIntegration {
             return targetFile ? getFileData(this.app, targetFile) : null;
           } catch (error) {
             console.error(
-              "Auto-Incremented Embed Headings: failed to resolve an embed for the outline",
+              "Seamless Note Embed: failed to resolve an embed for the outline",
               error,
             );
             return null;
@@ -339,7 +339,7 @@ export class OutlineIntegration {
         return combined;
       } catch (error) {
         console.error(
-          "Auto-Incremented Embed Headings: failed to build the outline",
+          "Seamless Note Embed: failed to build the outline",
           error,
         );
         return fallback;

@@ -1,6 +1,6 @@
-# Auto-Incremented Embed Headings
+# Seamless Note Embed
 
-An Obsidian plugin that shifts the headings of an embedded note so they nest under the heading that contains the embed. The embedded note itself is never modified.
+An Obsidian plugin that makes embedded notes feel like part of the containing note. It shifts the headings of an embedded note so they nest under the heading that contains the embed, and it offers optional appearance controls for the embed itself. The embedded note is never modified.
 
 ## The problem
 
@@ -73,7 +73,7 @@ Copy these files into your vault:
 └── styles.css
 ```
 
-Then enable **Auto-Incremented Embed Headings** in **Settings → Community plugins**.
+Then enable **Seamless Note Embed** in **Settings → Community plugins**. The plugin folder keeps its original ID (`auto-incremented-embed-headings`) so existing installations and settings continue to work.
 
 ### Development
 
@@ -99,9 +99,12 @@ These optional CSS-only settings work independently of heading shifting and are 
 - **Hide embed left line** — remove the colored line Obsidian draws on the left side of embedded notes.
 - **Remove embed indentation** — remove the extra left padding and indentation guides from embedded note content.
 - **Hide embedded note filename** — hide the filename shown above embedded notes.
+- **Hide embed scrollbar** — hide the scrollbar on the right side of embedded notes while keeping them scrollable with the mouse wheel or trackpad.
+- **Hide embed open-note button** — hide the open-note button in the top-right corner of embedded notes.
+- **Remove embed height limit** — let long embedded notes expand to their full height in Reading View and Live Preview instead of stopping at Obsidian's height limit. This also removes the embed scrollbar when the note fits within the old limit.
 - **Justify text in Reading View** — justify paragraphs, list items, table cells, and blockquotes, including text inside embedded notes.
 
-The line, indentation, and filename rules are scoped to notes in Reading View and Live Preview; justification applies to Reading View. Hover previews are deliberately excluded, so Ctrl-hovering a link keeps its normal indentation, filename, and left line. All four options also apply to PDFs created with **Export to PDF**. If you previously used CSS snippets for these effects, disable them; a broad snippet such as `.markdown-embed-content .markdown-preview-view { padding-left: 0 }` will still affect hover previews.
+The line, indentation, filename, scrollbar, open-note button, and height-limit rules are scoped to notes in Reading View and Live Preview; justification applies to Reading View. Hover previews are deliberately excluded, so Ctrl-hovering a link keeps its normal indentation, filename, scrollbar, open-note button, height limit, and left line. These settings are also carried into PDFs created with **Export to PDF**. If you previously used CSS snippets for these effects, disable them; a broad snippet such as `.markdown-embed-content .markdown-preview-view { padding-left: 0 }` will still affect hover previews.
 
 ## How it works
 

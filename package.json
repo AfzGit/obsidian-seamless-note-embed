@@ -1,7 +1,7 @@
 {
-  "name": "auto-incremented-embed-headings",
-  "version": "0.1.0",
-  "description": "Obsidian plugin that shifts embedded-note headings and integrates them into the built-in Outline view.",
+  "name": "seamless-note-embed",
+  "version": "1.0.0",
+  "description": "Obsidian plugin that shifts embedded-note headings, integrates them into the built-in Outline view, and adds optional embed appearance controls.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

@@ -7,6 +7,9 @@ export interface PluginSettings {
   hideEmbedLine: boolean;
   hideEmbedIndent: boolean;
   hideEmbedTitle: boolean;
+  hideEmbedScrollbar: boolean;
+  hideEmbedOpenButton: boolean;
+  removeEmbedLimit: boolean;
   justifyPreviewText: boolean;
 }
 
@@ -16,6 +19,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   hideEmbedLine: false,
   hideEmbedIndent: false,
   hideEmbedTitle: false,
+  hideEmbedScrollbar: false,
+  hideEmbedOpenButton: false,
+  removeEmbedLimit: false,
   justifyPreviewText: false,
 };
 
@@ -31,7 +37,7 @@ export class AutoIncrementedEmbedHeadingsSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Auto-incremented embed headings" });
+    containerEl.createEl("h2", { text: "Seamless Note Embed" });
 
     new Setting(containerEl)
       .setName("Enable heading level shifting")
@@ -104,6 +110,45 @@ export class AutoIncrementedEmbedHeadingsSettingTab extends PluginSettingTab {
       .addToggle((toggle) =>
         toggle.setValue(this.plugin.settings.hideEmbedTitle).onChange(async (value) => {
           this.plugin.settings.hideEmbedTitle = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyAppearanceSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Hide embed scrollbar")
+      .setDesc(
+        "Hide the scrollbar on the right side of embedded notes while keeping them scrollable with the mouse wheel or trackpad. Hover previews are unaffected.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.hideEmbedScrollbar).onChange(async (value) => {
+          this.plugin.settings.hideEmbedScrollbar = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyAppearanceSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Hide embed open-note button")
+      .setDesc(
+        "Hide the open-note button in the top-right corner of embedded notes. Hover previews are unaffected.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.hideEmbedOpenButton).onChange(async (value) => {
+          this.plugin.settings.hideEmbedOpenButton = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyAppearanceSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Remove embed height limit")
+      .setDesc(
+        "Let long embedded notes expand to their full height in Reading View and Live Preview instead of stopping at Obsidian's height limit. Hover previews are unaffected.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.removeEmbedLimit).onChange(async (value) => {
+          this.plugin.settings.removeEmbedLimit = value;
           await this.plugin.saveSettings();
           this.plugin.applyAppearanceSettings();
         }),

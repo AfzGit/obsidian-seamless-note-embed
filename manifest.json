@@ -1,9 +1,9 @@
 {
   "id": "auto-incremented-embed-headings",
-  "name": "Auto-Incremented Embed Headings",
-  "version": "0.1.0",
+  "name": "Seamless Note Embed",
+  "version": "1.0.0",
   "minAppVersion": "1.5.0",
-  "description": "Shifts the headings of embedded notes to match the heading level they are nested under, in the note and its outline, without changing the embedded note.",
+  "description": "Makes embedded notes seamless: shifts their headings, integrates them into the Outline view, and adds optional embed appearance controls.",
   "author": "malan",
   "isDesktopOnly": false
 }

@@ -20,6 +20,18 @@ const APPEARANCE_OPTIONS = {
     className: "aeih-hide-embed-title",
     printFlag: "--aeih-print-hide-embed-title",
   },
+  hideEmbedScrollbar: {
+    className: "aeih-hide-embed-scrollbar",
+    printFlag: "--aeih-print-hide-embed-scrollbar",
+  },
+  hideEmbedOpenButton: {
+    className: "aeih-hide-embed-open-button",
+    printFlag: "--aeih-print-hide-embed-open-button",
+  },
+  removeEmbedLimit: {
+    className: "aeih-remove-embed-limit",
+    printFlag: "--aeih-print-remove-embed-limit",
+  },
   justifyPreviewText: {
     className: "aeih-justify-preview",
     printFlag: "--aeih-print-justify-preview",
@@ -160,6 +172,21 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
       body,
       APPEARANCE_OPTIONS.hideEmbedTitle,
       this.settings.hideEmbedTitle,
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.hideEmbedScrollbar,
+      this.settings.hideEmbedScrollbar,
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.hideEmbedOpenButton,
+      this.settings.hideEmbedOpenButton,
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.removeEmbedLimit,
+      this.settings.removeEmbedLimit,
     );
     this.applyAppearanceOption(
       body,

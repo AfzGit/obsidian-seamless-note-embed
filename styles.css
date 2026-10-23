@@ -3,8 +3,8 @@
  *
  * Every selector is scoped to a note that is open in Reading View or Live
  * Preview. Hover previews (`.popover.hover-popover`) are deliberately outside
- * these roots, so these rules do not change their indentation, filename, or
- * left line.
+ * these roots, so these rules do not change their indentation, filename,
+ * scrollbar, open-note button, height limit, or left line.
  *
  * Obsidian's PDF export copies inline custom properties from the main body to
  * the print window, but not arbitrary body classes. The plugin therefore sets
@@ -33,6 +33,67 @@ body.aeih-hide-embed-title .markdown-reading-view .markdown-embed-title,
 body.aeih-hide-embed-title .markdown-source-view .markdown-embed-title,
 body[style*="--aeih-print-hide-embed-title:"] .print .markdown-embed-title {
   display: none !important;
+}
+
+/*
+ * Hide the embed scrollbar without disabling scrolling. The outer
+ * `.markdown-embed-content` is the scroll container in Reading View, while the
+ * preview view and the embedded CodeMirror scroller can be the actual scroll
+ * containers depending on the view mode.
+ */
+body.aeih-hide-embed-scrollbar .markdown-reading-view .markdown-embed-content,
+body.aeih-hide-embed-scrollbar .markdown-source-view .markdown-embed-content,
+body.aeih-hide-embed-scrollbar .markdown-reading-view .markdown-embed-content .markdown-preview-view,
+body.aeih-hide-embed-scrollbar .markdown-source-view .markdown-embed-content .markdown-preview-view,
+body.aeih-hide-embed-scrollbar .markdown-reading-view .markdown-embed-content .cm-scroller,
+body.aeih-hide-embed-scrollbar .markdown-source-view .markdown-embed-content .cm-scroller,
+body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content,
+body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content .markdown-preview-view,
+body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content .cm-scroller {
+  scrollbar-width: none !important;
+  scrollbar-gutter: auto !important;
+}
+
+body.aeih-hide-embed-scrollbar .markdown-reading-view .markdown-embed-content::-webkit-scrollbar,
+body.aeih-hide-embed-scrollbar .markdown-source-view .markdown-embed-content::-webkit-scrollbar,
+body.aeih-hide-embed-scrollbar .markdown-reading-view .markdown-embed-content .markdown-preview-view::-webkit-scrollbar,
+body.aeih-hide-embed-scrollbar .markdown-source-view .markdown-embed-content .markdown-preview-view::-webkit-scrollbar,
+body.aeih-hide-embed-scrollbar .markdown-reading-view .markdown-embed-content .cm-scroller::-webkit-scrollbar,
+body.aeih-hide-embed-scrollbar .markdown-source-view .markdown-embed-content .cm-scroller::-webkit-scrollbar,
+body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content::-webkit-scrollbar,
+body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content .markdown-preview-view::-webkit-scrollbar,
+body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content .cm-scroller::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Hide the open-note button in the top-right corner of note embeds. */
+body.aeih-hide-embed-open-button .markdown-reading-view .markdown-embed .markdown-embed-link,
+body.aeih-hide-embed-open-button .markdown-source-view .markdown-embed .markdown-embed-link,
+body[style*="--aeih-print-hide-embed-open-button:"] .print .markdown-embed .markdown-embed-link {
+  display: none !important;
+}
+
+/*
+ * Remove Obsidian's maximum height for embedded notes so they expand to their
+ * full length. This also removes the scrollbar when the whole note fits.
+ */
+body.aeih-remove-embed-limit .markdown-reading-view .markdown-embed-content,
+body.aeih-remove-embed-limit .markdown-source-view .markdown-embed-content,
+body.aeih-remove-embed-limit .markdown-reading-view .markdown-embed-content .markdown-preview-view,
+body.aeih-remove-embed-limit .markdown-source-view .markdown-embed-content .markdown-preview-view,
+body[style*="--aeih-print-remove-embed-limit:"] .print .markdown-embed-content,
+body[style*="--aeih-print-remove-embed-limit:"] .print .markdown-embed-content .markdown-preview-view {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+body.aeih-remove-embed-limit .markdown-reading-view .markdown-embed-content .markdown-preview-view,
+body.aeih-remove-embed-limit .markdown-source-view .markdown-embed-content .markdown-preview-view,
+body[style*="--aeih-print-remove-embed-limit:"] .print .markdown-embed-content .markdown-preview-view {
+  height: auto !important;
+  scrollbar-gutter: auto !important;
 }
 
 /*
