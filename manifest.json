@@ -1,0 +1,9 @@
+{
+  "id": "auto-incremented-embed-headings",
+  "name": "Auto-Incremented Embed Headings",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Shifts the headings of embedded notes to match the heading level they are nested under, without changing the embedded note.",
+  "author": "malan",
+  "isDesktopOnly": false
+}
