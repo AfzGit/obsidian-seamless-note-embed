@@ -7,6 +7,13 @@ import {
   PluginSettings,
 } from "./settings";
 
+const APPEARANCE_CLASSES = {
+  hideEmbedLine: "aeih-hide-embed-line",
+  hideEmbedIndent: "aeih-hide-embed-indent",
+  hideEmbedTitle: "aeih-hide-embed-title",
+  justifyPreviewText: "aeih-justify-preview",
+} as const;
+
 export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
   settings!: PluginSettings;
   private processor!: EmbedHeadingProcessor;
@@ -14,6 +21,7 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+    this.applyAppearanceSettings();
 
     this.processor = new EmbedHeadingProcessor(this.app, () => this.settings);
     this.outline = new OutlineIntegration(this.app, () => this.settings);
@@ -92,6 +100,7 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
   }
 
   onunload(): void {
+    this.clearAppearanceSettings();
     this.outline?.destroy();
     this.processor?.restoreAll();
     this.processor?.destroy();
@@ -115,7 +124,37 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
     this.outline.refresh();
   }
 
+  /**
+   * Apply the CSS-only appearance options. These are intentionally separate
+   * from heading shifting so they can be used without changing heading levels.
+   */
+  applyAppearanceSettings(): void {
+    if (typeof document === "undefined" || !document.body) {
+      return;
+    }
+
+    const body = document.body;
+    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedLine, this.settings.hideEmbedLine);
+    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedIndent, this.settings.hideEmbedIndent);
+    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedTitle, this.settings.hideEmbedTitle);
+    body.classList.toggle(
+      APPEARANCE_CLASSES.justifyPreviewText,
+      this.settings.justifyPreviewText,
+    );
+  }
+
+  private clearAppearanceSettings(): void {
+    if (typeof document === "undefined" || !document.body) {
+      return;
+    }
+
+    for (const className of Object.values(APPEARANCE_CLASSES)) {
+      document.body.classList.remove(className);
+    }
+  }
+
   reapplySettings(): void {
+    this.applyAppearanceSettings();
     this.refreshHeadingLevels();
     this.outline.onSettingsChanged();
   }

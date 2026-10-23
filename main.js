@@ -1401,7 +1401,11 @@ var EmbedHeadingProcessor = class {
 var import_obsidian = require("obsidian");
 var DEFAULT_SETTINGS = {
   enabled: true,
-  livePreview: true
+  livePreview: true,
+  hideEmbedLine: false,
+  hideEmbedIndent: false,
+  hideEmbedTitle: false,
+  justifyPreviewText: false
 };
 var AutoIncrementedEmbedHeadingsSettingTab = class extends import_obsidian.PluginSettingTab {
   constructor(app, plugin) {
@@ -1435,13 +1439,57 @@ var AutoIncrementedEmbedHeadingsSettingTab = class extends import_obsidian.Plugi
         this.plugin.refreshHeadingLevels();
       })
     );
+    containerEl.createEl("h3", { text: "Embed appearance" });
+    new import_obsidian.Setting(containerEl).setName("Hide embed left line").setDesc(
+      "Remove the colored line Obsidian draws on the left side of embedded notes. Hover previews are unaffected."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.hideEmbedLine).onChange(async (value) => {
+        this.plugin.settings.hideEmbedLine = value;
+        await this.plugin.saveSettings();
+        this.plugin.applyAppearanceSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Remove embed indentation").setDesc(
+      "Remove the extra left padding and indentation guides from embedded note content. Only embeds in notes are affected; hover previews keep their normal indentation."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.hideEmbedIndent).onChange(async (value) => {
+        this.plugin.settings.hideEmbedIndent = value;
+        await this.plugin.saveSettings();
+        this.plugin.applyAppearanceSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Hide embedded note filename").setDesc(
+      "Hide the filename shown above embedded notes. Hover previews are unaffected."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.hideEmbedTitle).onChange(async (value) => {
+        this.plugin.settings.hideEmbedTitle = value;
+        await this.plugin.saveSettings();
+        this.plugin.applyAppearanceSettings();
+      })
+    );
+    new import_obsidian.Setting(containerEl).setName("Justify text in Reading View").setDesc(
+      "Justify paragraphs, list items, table cells, and blockquotes in Reading View, including text inside embedded notes."
+    ).addToggle(
+      (toggle) => toggle.setValue(this.plugin.settings.justifyPreviewText).onChange(async (value) => {
+        this.plugin.settings.justifyPreviewText = value;
+        await this.plugin.saveSettings();
+        this.plugin.applyAppearanceSettings();
+      })
+    );
   }
 };
 
 // src/main.ts
+var APPEARANCE_CLASSES = {
+  hideEmbedLine: "aeih-hide-embed-line",
+  hideEmbedIndent: "aeih-hide-embed-indent",
+  hideEmbedTitle: "aeih-hide-embed-title",
+  justifyPreviewText: "aeih-justify-preview"
+};
 var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
   async onload() {
     await this.loadSettings();
+    this.applyAppearanceSettings();
     this.processor = new EmbedHeadingProcessor(this.app, () => this.settings);
     this.outline = new OutlineIntegration(this.app, () => this.settings);
     this.outline.start();
@@ -1506,6 +1554,7 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
   }
   onunload() {
     var _a, _b, _c;
+    this.clearAppearanceSettings();
     (_a = this.outline) == null ? void 0 : _a.destroy();
     (_b = this.processor) == null ? void 0 : _b.restoreAll();
     (_c = this.processor) == null ? void 0 : _c.destroy();
@@ -1525,7 +1574,33 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
     this.processor.refreshAll();
     this.outline.refresh();
   }
+  /**
+   * Apply the CSS-only appearance options. These are intentionally separate
+   * from heading shifting so they can be used without changing heading levels.
+   */
+  applyAppearanceSettings() {
+    if (typeof document === "undefined" || !document.body) {
+      return;
+    }
+    const body = document.body;
+    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedLine, this.settings.hideEmbedLine);
+    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedIndent, this.settings.hideEmbedIndent);
+    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedTitle, this.settings.hideEmbedTitle);
+    body.classList.toggle(
+      APPEARANCE_CLASSES.justifyPreviewText,
+      this.settings.justifyPreviewText
+    );
+  }
+  clearAppearanceSettings() {
+    if (typeof document === "undefined" || !document.body) {
+      return;
+    }
+    for (const className of Object.values(APPEARANCE_CLASSES)) {
+      document.body.classList.remove(className);
+    }
+  }
   reapplySettings() {
+    this.applyAppearanceSettings();
     this.refreshHeadingLevels();
     this.outline.onSettingsChanged();
   }

@@ -69,7 +69,8 @@ Copy these files into your vault:
 ```text
 <vault>/.obsidian/plugins/auto-incremented-embed-headings/
 ├── main.js
-└── manifest.json
+├── manifest.json
+└── styles.css
 ```
 
 Then enable **Auto-Incremented Embed Headings** in **Settings → Community plugins**.
@@ -85,11 +86,22 @@ npm test        # heading algorithm and DOM tests
 
 ## Settings
 
-- **Enable heading level shifting** — turns the plugin on or off.
-- **Apply in Live Preview** — also shift embeds while editing. Reading View is always supported while the plugin is enabled.
+- **Enable heading level shifting** — turns heading shifting on or off.
+- **Apply in Live Preview** — also shift embeds while editing. Reading View is always supported while heading shifting is enabled.
 - **Refresh now** — re-apply shifts to every open note.
 
 There is also a command, **Refresh embedded heading levels**, in the command palette.
+
+### Embed appearance
+
+These optional CSS-only settings work independently of heading shifting and are all off by default:
+
+- **Hide embed left line** — remove the colored line Obsidian draws on the left side of embedded notes.
+- **Remove embed indentation** — remove the extra left padding and indentation guides from embedded note content.
+- **Hide embedded note filename** — hide the filename shown above embedded notes.
+- **Justify text in Reading View** — justify paragraphs, list items, table cells, and blockquotes, including text inside embedded notes.
+
+The line, indentation, and filename rules are scoped to notes in Reading View and Live Preview; justification applies to Reading View. Hover previews are deliberately excluded, so Ctrl-hovering a link keeps its normal indentation, filename, and left line. If you previously used CSS snippets for these effects, disable them; a broad snippet such as `.markdown-embed-content .markdown-preview-view { padding-left: 0 }` will still affect hover previews.
 
 ## How it works
 

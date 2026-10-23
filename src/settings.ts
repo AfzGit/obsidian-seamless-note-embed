@@ -4,11 +4,19 @@ import type AutoIncrementedEmbedHeadingsPlugin from "./main";
 export interface PluginSettings {
   enabled: boolean;
   livePreview: boolean;
+  hideEmbedLine: boolean;
+  hideEmbedIndent: boolean;
+  hideEmbedTitle: boolean;
+  justifyPreviewText: boolean;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
   enabled: true,
   livePreview: true,
+  hideEmbedLine: false,
+  hideEmbedIndent: false,
+  hideEmbedTitle: false,
+  justifyPreviewText: false,
 };
 
 export class AutoIncrementedEmbedHeadingsSettingTab extends PluginSettingTab {
@@ -57,6 +65,60 @@ export class AutoIncrementedEmbedHeadingsSettingTab extends PluginSettingTab {
       .addButton((button) =>
         button.setButtonText("Refresh").onClick(() => {
           this.plugin.refreshHeadingLevels();
+        }),
+      );
+
+    containerEl.createEl("h3", { text: "Embed appearance" });
+
+    new Setting(containerEl)
+      .setName("Hide embed left line")
+      .setDesc(
+        "Remove the colored line Obsidian draws on the left side of embedded notes. Hover previews are unaffected.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.hideEmbedLine).onChange(async (value) => {
+          this.plugin.settings.hideEmbedLine = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyAppearanceSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Remove embed indentation")
+      .setDesc(
+        "Remove the extra left padding and indentation guides from embedded note content. Only embeds in notes are affected; hover previews keep their normal indentation.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.hideEmbedIndent).onChange(async (value) => {
+          this.plugin.settings.hideEmbedIndent = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyAppearanceSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Hide embedded note filename")
+      .setDesc(
+        "Hide the filename shown above embedded notes. Hover previews are unaffected.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.hideEmbedTitle).onChange(async (value) => {
+          this.plugin.settings.hideEmbedTitle = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyAppearanceSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName("Justify text in Reading View")
+      .setDesc(
+        "Justify paragraphs, list items, table cells, and blockquotes in Reading View, including text inside embedded notes.",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(this.plugin.settings.justifyPreviewText).onChange(async (value) => {
+          this.plugin.settings.justifyPreviewText = value;
+          await this.plugin.saveSettings();
+          this.plugin.applyAppearanceSettings();
         }),
       );
   }

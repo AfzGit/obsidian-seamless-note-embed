@@ -1,0 +1,76 @@
+/*
+ * Optional embed appearance settings.
+ *
+ * Every selector is scoped to a note that is open in Reading View or Live
+ * Preview. Hover previews (`.popover.hover-popover`) are deliberately outside
+ * these roots, so these rules do not change their indentation, filename, or
+ * left line.
+ */
+
+/* Hide the colored line Obsidian draws at the inline-start edge of an embed. */
+body.aeih-hide-embed-line .markdown-reading-view .markdown-embed,
+body.aeih-hide-embed-line .markdown-source-view .markdown-embed {
+  --embed-border-start: none !important;
+  border-inline-start: none !important;
+  border-left: none !important;
+}
+
+body.aeih-hide-embed-line .markdown-reading-view .markdown-embed-content,
+body.aeih-hide-embed-line .markdown-source-view .markdown-embed-content {
+  border-inline-start: none !important;
+  border-left: none !important;
+}
+
+/* Hide the filename shown above an embedded note. */
+body.aeih-hide-embed-title .markdown-reading-view .markdown-embed-title,
+body.aeih-hide-embed-title .markdown-source-view .markdown-embed-title {
+  display: none !important;
+}
+
+/*
+ * Remove the extra left indentation Obsidian applies to embedded note content.
+ * This is scoped to `.markdown-embed-content` inside a note, not to every
+ * `.markdown-preview-view`, so hover previews keep their normal indentation.
+ */
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed {
+  --embed-padding: 0 !important;
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+}
+
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content {
+  padding-left: 0 !important;
+}
+
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .markdown-preview-view,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .markdown-preview-view,
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .markdown-preview-sizer,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .markdown-preview-sizer,
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .markdown-preview-section,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .markdown-preview-section,
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .el-p,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .el-p,
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .el-p p,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .el-p p {
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+  border-left: none !important;
+  border-inline-start: none !important;
+}
+
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content,
+body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .show-indentation-guide,
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .show-indentation-guide {
+  --indentation-guide-width: 0 !important;
+}
+
+/* Justify text in Reading View, including the text of embedded notes. */
+body.aeih-justify-preview .markdown-reading-view .markdown-preview-view p,
+body.aeih-justify-preview .markdown-reading-view .markdown-preview-view li,
+body.aeih-justify-preview .markdown-reading-view .markdown-preview-view td,
+body.aeih-justify-preview .markdown-reading-view .markdown-preview-view blockquote {
+  text-align: justify !important;
+}
