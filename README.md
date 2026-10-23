@@ -101,7 +101,7 @@ These optional CSS-only settings work independently of heading shifting and are 
 - **Hide embedded note filename** — hide the filename shown above embedded notes.
 - **Justify text in Reading View** — justify paragraphs, list items, table cells, and blockquotes, including text inside embedded notes.
 
-The line, indentation, and filename rules are scoped to notes in Reading View and Live Preview; justification applies to Reading View. Hover previews are deliberately excluded, so Ctrl-hovering a link keeps its normal indentation, filename, and left line. If you previously used CSS snippets for these effects, disable them; a broad snippet such as `.markdown-embed-content .markdown-preview-view { padding-left: 0 }` will still affect hover previews.
+The line, indentation, and filename rules are scoped to notes in Reading View and Live Preview; justification applies to Reading View. Hover previews are deliberately excluded, so Ctrl-hovering a link keeps its normal indentation, filename, and left line. All four options also apply to PDFs created with **Export to PDF**. If you previously used CSS snippets for these effects, disable them; a broad snippet such as `.markdown-embed-content .markdown-preview-view { padding-left: 0 }` will still affect hover previews.
 
 ## How it works
 

@@ -1480,11 +1480,23 @@ var AutoIncrementedEmbedHeadingsSettingTab = class extends import_obsidian.Plugi
 };
 
 // src/main.ts
-var APPEARANCE_CLASSES = {
-  hideEmbedLine: "aeih-hide-embed-line",
-  hideEmbedIndent: "aeih-hide-embed-indent",
-  hideEmbedTitle: "aeih-hide-embed-title",
-  justifyPreviewText: "aeih-justify-preview"
+var APPEARANCE_OPTIONS = {
+  hideEmbedLine: {
+    className: "aeih-hide-embed-line",
+    printFlag: "--aeih-print-hide-embed-line"
+  },
+  hideEmbedIndent: {
+    className: "aeih-hide-embed-indent",
+    printFlag: "--aeih-print-hide-embed-indent"
+  },
+  hideEmbedTitle: {
+    className: "aeih-hide-embed-title",
+    printFlag: "--aeih-print-hide-embed-title"
+  },
+  justifyPreviewText: {
+    className: "aeih-justify-preview",
+    printFlag: "--aeih-print-justify-preview"
+  }
 };
 var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
   async onload() {
@@ -1583,20 +1595,42 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
       return;
     }
     const body = document.body;
-    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedLine, this.settings.hideEmbedLine);
-    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedIndent, this.settings.hideEmbedIndent);
-    body.classList.toggle(APPEARANCE_CLASSES.hideEmbedTitle, this.settings.hideEmbedTitle);
-    body.classList.toggle(
-      APPEARANCE_CLASSES.justifyPreviewText,
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.hideEmbedLine,
+      this.settings.hideEmbedLine
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.hideEmbedIndent,
+      this.settings.hideEmbedIndent
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.hideEmbedTitle,
+      this.settings.hideEmbedTitle
+    );
+    this.applyAppearanceOption(
+      body,
+      APPEARANCE_OPTIONS.justifyPreviewText,
       this.settings.justifyPreviewText
     );
+  }
+  applyAppearanceOption(body, option, enabled) {
+    body.classList.toggle(option.className, enabled);
+    if (enabled) {
+      body.style.setProperty(option.printFlag, "1");
+    } else {
+      body.style.removeProperty(option.printFlag);
+    }
   }
   clearAppearanceSettings() {
     if (typeof document === "undefined" || !document.body) {
       return;
     }
-    for (const className of Object.values(APPEARANCE_CLASSES)) {
-      document.body.classList.remove(className);
+    for (const option of Object.values(APPEARANCE_OPTIONS)) {
+      document.body.classList.remove(option.className);
+      document.body.style.removeProperty(option.printFlag);
     }
   }
   reapplySettings() {

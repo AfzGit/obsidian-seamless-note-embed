@@ -5,25 +5,33 @@
  * Preview. Hover previews (`.popover.hover-popover`) are deliberately outside
  * these roots, so these rules do not change their indentation, filename, or
  * left line.
+ *
+ * Obsidian's PDF export copies inline custom properties from the main body to
+ * the print window, but not arbitrary body classes. The plugin therefore sets
+ * `--aeih-print-*` flags on the body; the `body[style*=...] .print` selectors
+ * below make the same rules apply to exported PDFs.
  */
 
 /* Hide the colored line Obsidian draws at the inline-start edge of an embed. */
 body.aeih-hide-embed-line .markdown-reading-view .markdown-embed,
-body.aeih-hide-embed-line .markdown-source-view .markdown-embed {
+body.aeih-hide-embed-line .markdown-source-view .markdown-embed,
+body[style*="--aeih-print-hide-embed-line:"] .print .markdown-embed {
   --embed-border-start: none !important;
   border-inline-start: none !important;
   border-left: none !important;
 }
 
 body.aeih-hide-embed-line .markdown-reading-view .markdown-embed-content,
-body.aeih-hide-embed-line .markdown-source-view .markdown-embed-content {
+body.aeih-hide-embed-line .markdown-source-view .markdown-embed-content,
+body[style*="--aeih-print-hide-embed-line:"] .print .markdown-embed-content {
   border-inline-start: none !important;
   border-left: none !important;
 }
 
 /* Hide the filename shown above an embedded note. */
 body.aeih-hide-embed-title .markdown-reading-view .markdown-embed-title,
-body.aeih-hide-embed-title .markdown-source-view .markdown-embed-title {
+body.aeih-hide-embed-title .markdown-source-view .markdown-embed-title,
+body[style*="--aeih-print-hide-embed-title:"] .print .markdown-embed-title {
   display: none !important;
 }
 
@@ -33,14 +41,16 @@ body.aeih-hide-embed-title .markdown-source-view .markdown-embed-title {
  * `.markdown-preview-view`, so hover previews keep their normal indentation.
  */
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed,
-body.aeih-hide-embed-indent .markdown-source-view .markdown-embed {
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed {
   --embed-padding: 0 !important;
   margin-left: 0 !important;
   padding-left: 0 !important;
 }
 
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content,
-body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content {
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content {
   padding-left: 0 !important;
 }
 
@@ -53,7 +63,12 @@ body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .markd
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .el-p,
 body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .el-p,
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .el-p p,
-body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .el-p p {
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .el-p p,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .markdown-preview-view,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .markdown-preview-sizer,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .markdown-preview-section,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .el-p,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .el-p p {
   padding-left: 0 !important;
   margin-left: 0 !important;
   border-left: none !important;
@@ -63,7 +78,9 @@ body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .el-p 
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content,
 body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content,
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .show-indentation-guide,
-body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .show-indentation-guide {
+body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .show-indentation-guide,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content,
+body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .show-indentation-guide {
   --indentation-guide-width: 0 !important;
 }
 
@@ -71,6 +88,10 @@ body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .show-
 body.aeih-justify-preview .markdown-reading-view .markdown-preview-view p,
 body.aeih-justify-preview .markdown-reading-view .markdown-preview-view li,
 body.aeih-justify-preview .markdown-reading-view .markdown-preview-view td,
-body.aeih-justify-preview .markdown-reading-view .markdown-preview-view blockquote {
+body.aeih-justify-preview .markdown-reading-view .markdown-preview-view blockquote,
+body[style*="--aeih-print-justify-preview:"] .print .markdown-preview-view p,
+body[style*="--aeih-print-justify-preview:"] .print .markdown-preview-view li,
+body[style*="--aeih-print-justify-preview:"] .print .markdown-preview-view td,
+body[style*="--aeih-print-justify-preview:"] .print .markdown-preview-view blockquote {
   text-align: justify !important;
 }
