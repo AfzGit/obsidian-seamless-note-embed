@@ -72,6 +72,7 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
     this.thirdPartyOutlines = new ThirdPartyOutlineIntegration(
       this.app,
       this.metadataHeadings,
+      (file, line) => this.navigationBridge.navigateToLine(file, line),
     );
     this.thirdPartyOutlines.start();
 

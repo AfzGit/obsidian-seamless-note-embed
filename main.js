@@ -828,6 +828,23 @@ var HeadingNavigationBridge = class {
     this.scroller.cancel();
     this.patchAll();
   }
+  /**
+   * Schedule an exact scroll for a virtual heading line. This is for plugins
+   * whose navigation path only performs a CodeMirror line lookup, which is
+   * intentionally treated as passive by the bridge.
+   */
+  navigateToLine(file, line) {
+    if (!this.active) {
+      return false;
+    }
+    const token = this.resolveLine(file, line);
+    if (!token) {
+      return false;
+    }
+    this.rememberPending(token);
+    this.scroller.schedule(file, token.meta.key);
+    return true;
+  }
   patchAll() {
     if (!this.active || this.destroyed) {
       return false;
@@ -1077,8 +1094,6 @@ var HeadingNavigationBridge = class {
         if (typeof line === "number") {
           const token = this.resolveLine(file, line);
           if (token) {
-            this.rememberPending(token);
-            this.scroller.schedule(file, token.meta.key);
             return token.offset;
           }
         }
@@ -1176,8 +1191,6 @@ var HeadingNavigationBridge = class {
     if (this.active && file && typeof line === "number" && !Number.isInteger(line)) {
       const token = this.resolveLine(file, line);
       if (token) {
-        this.rememberPending(token);
-        this.scroller.schedule(file, token.meta.key);
         return original.call(doc, token.realLine + 1, ...args);
       }
     }
@@ -2387,12 +2400,14 @@ function quietMeta(navigator, index) {
   return (_a = navigator.__aeihHeaders[index]) == null ? void 0 : _a.aeih;
 }
 var ThirdPartyOutlineIntegration = class {
-  constructor(app, metadata) {
+  constructor(app, metadata, navigateToVirtualHeading) {
     this.app = app;
     this.metadata = metadata;
+    this.navigateToVirtualHeading = navigateToVirtualHeading;
     this.methodPatches = [];
     this.patchedQuietPlugins = /* @__PURE__ */ new WeakSet();
     this.patchedSubtlePlugins = /* @__PURE__ */ new WeakSet();
+    this.subtleNavigateTimer = null;
     this.active = false;
     this.destroyed = false;
   }
@@ -2406,6 +2421,10 @@ var ThirdPartyOutlineIntegration = class {
   }
   stop() {
     this.active = false;
+    if (this.subtleNavigateTimer !== null) {
+      window.clearTimeout(this.subtleNavigateTimer);
+      this.subtleNavigateTimer = null;
+    }
     this.restoreAll();
     this.patchedQuietPlugins = /* @__PURE__ */ new WeakSet();
     this.patchedSubtlePlugins = /* @__PURE__ */ new WeakSet();
@@ -2630,7 +2649,59 @@ var ThirdPartyOutlineIntegration = class {
         return result;
       };
     });
+    this.installMethod(prototype, "navigate", (original) => {
+      return function(index, ...args) {
+        var _a, _b, _c, _d, _e, _f, _g, _h;
+        const result = original.call(this, index, ...args);
+        if (!integration.active || typeof index !== "number") {
+          return result;
+        }
+        const heading = (_a = this.headings) == null ? void 0 : _a[index];
+        const file = (_b = this.view) == null ? void 0 : _b.file;
+        const line = heading == null ? void 0 : heading.line;
+        if (!file || typeof line !== "number") {
+          return result;
+        }
+        const mode = (_d = (_c = this.view) == null ? void 0 : _c.getMode) == null ? void 0 : _d.call(_c);
+        let rawSource = false;
+        try {
+          rawSource = ((_g = (_f = (_e = this.view) == null ? void 0 : _e.getState) == null ? void 0 : _f.call(_e)) == null ? void 0 : _g.source) === true;
+        } catch (e) {
+          rawSource = false;
+        }
+        if (mode === "preview" || rawSource) {
+          return result;
+        }
+        integration.scheduleSubtleNavigation(
+          file,
+          line,
+          ((_h = this.settings) == null ? void 0 : _h.smoothScroll) ? 320 : 0
+        );
+        return result;
+      };
+    });
     return true;
+  }
+  scheduleSubtleNavigation(file, line, delay) {
+    if (!this.navigateToVirtualHeading) {
+      return;
+    }
+    if (this.subtleNavigateTimer !== null) {
+      window.clearTimeout(this.subtleNavigateTimer);
+      this.subtleNavigateTimer = null;
+    }
+    const run = () => {
+      var _a;
+      this.subtleNavigateTimer = null;
+      if (this.active) {
+        (_a = this.navigateToVirtualHeading) == null ? void 0 : _a.call(this, file, line);
+      }
+    };
+    if (delay > 0) {
+      this.subtleNavigateTimer = window.setTimeout(run, delay);
+    } else {
+      run();
+    }
   }
   attachSubtleMeta(overlay) {
     var _a, _b, _c, _d;
@@ -2896,7 +2967,8 @@ var AutoIncrementedEmbedHeadingsPlugin = class extends import_obsidian2.Plugin {
     this.outline.start();
     this.thirdPartyOutlines = new ThirdPartyOutlineIntegration(
       this.app,
-      this.metadataHeadings
+      this.metadataHeadings,
+      (file, line) => this.navigationBridge.navigateToLine(file, line)
     );
     this.thirdPartyOutlines.start();
     this.registerMarkdownPostProcessor((element) => {

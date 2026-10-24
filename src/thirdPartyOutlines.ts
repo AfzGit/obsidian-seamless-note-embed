@@ -14,6 +14,8 @@ interface MarkdownViewLike {
   file?: TFile | null;
   contentEl?: HTMLElement;
   getViewType?: () => string;
+  getMode?: () => string;
+  getState?: () => { source?: boolean } | null;
 }
 
 interface HeaderWithMeta {
@@ -47,6 +49,7 @@ interface SubtleOverlayLike {
     minLevel?: number;
     maxLevel?: number;
     show?: string;
+    smoothScroll?: boolean;
   };
   refresh?: AnyFunction;
   navigate?: AnyFunction;
@@ -54,6 +57,8 @@ interface SubtleOverlayLike {
   setActive?: AnyFunction;
   activeIndex?: number;
 }
+
+type VirtualHeadingNavigator = (file: TFile, line: number) => boolean;
 
 interface SubtlePluginLike {
   overlay?: SubtleOverlayLike | null;
@@ -108,12 +113,14 @@ export class ThirdPartyOutlineIntegration {
   private readonly methodPatches: MethodPatch[] = [];
   private patchedQuietPlugins = new WeakSet<object>();
   private patchedSubtlePlugins = new WeakSet<object>();
+  private subtleNavigateTimer: number | null = null;
   private active = false;
   private destroyed = false;
 
   constructor(
     private readonly app: App,
     private readonly metadata: MetadataHeadingIntegration,
+    private readonly navigateToVirtualHeading?: VirtualHeadingNavigator,
   ) {}
 
   start(): void {
@@ -130,6 +137,10 @@ export class ThirdPartyOutlineIntegration {
 
   stop(): void {
     this.active = false;
+    if (this.subtleNavigateTimer !== null) {
+      window.clearTimeout(this.subtleNavigateTimer);
+      this.subtleNavigateTimer = null;
+    }
     this.restoreAll();
     this.patchedQuietPlugins = new WeakSet();
     this.patchedSubtlePlugins = new WeakSet();
@@ -450,7 +461,81 @@ export class ThirdPartyOutlineIntegration {
       };
     });
 
+    // Subtle TOC's source/live-preview navigation resolves the heading through
+    // CodeMirror's `Text.line` and then scrolls to that line. For an embedded
+    // heading that line is the embed's own line, so schedule the exact visible
+    // heading after Subtle's own scroll animation has settled.
+    this.installMethod(prototype, "navigate", (original) => {
+      return function (
+        this: SubtleOverlayLike,
+        index: unknown,
+        ...args: unknown[]
+      ): unknown {
+        const result = original.call(this, index, ...args);
+
+        if (!integration.active || typeof index !== "number") {
+          return result;
+        }
+
+        const heading = this.headings?.[index];
+        const file = this.view?.file;
+        const line = heading?.line;
+        if (!file || typeof line !== "number") {
+          return result;
+        }
+
+        const mode = this.view?.getMode?.();
+        let rawSource = false;
+        try {
+          rawSource = this.view?.getState?.()?.source === true;
+        } catch {
+          rawSource = false;
+        }
+
+        // Reading view is handled by the preview renderer; raw source has no
+        // rendered embedded headings to target.
+        if (mode === "preview" || rawSource) {
+          return result;
+        }
+
+        integration.scheduleSubtleNavigation(
+          file,
+          line,
+          this.settings?.smoothScroll ? 320 : 0,
+        );
+        return result;
+      };
+    });
+
     return true;
+  }
+
+  private scheduleSubtleNavigation(
+    file: TFile,
+    line: number,
+    delay: number,
+  ): void {
+    if (!this.navigateToVirtualHeading) {
+      return;
+    }
+
+    if (this.subtleNavigateTimer !== null) {
+      window.clearTimeout(this.subtleNavigateTimer);
+      this.subtleNavigateTimer = null;
+    }
+
+    const run = (): void => {
+      this.subtleNavigateTimer = null;
+      if (this.active) {
+        this.navigateToVirtualHeading?.(file, line);
+      }
+    };
+
+    if (delay > 0) {
+      this.subtleNavigateTimer = window.setTimeout(run, delay);
+    } else {
+      run();
+    }
   }
 
   private attachSubtleMeta(overlay: SubtleOverlayLike): void {

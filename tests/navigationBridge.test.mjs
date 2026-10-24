@@ -209,21 +209,21 @@ test("maps CodeMirror lines and preview applyScroll", async () => {
   const line = doc.line(token.line + 1);
   assert.equal(line.number, token.realLine + 1);
 
+  // Line lookups are passive; they must not steal the scroll position from
+  // active-heading tracking or other hit-testing code.
   await wait();
-  assert.equal(scrollCalls.length, 1);
+  assert.equal(scrollCalls.length, 0);
 
   // CodeMirror can replace the document object on edits while reusing the
   // same prototype. Resolve the owning view dynamically in that case.
-  scrollCalls.length = 0;
   const NextDoc = doc.constructor;
   const nextDoc = new NextDoc();
   view.editor.cm.state.doc = nextDoc;
   assert.equal(nextDoc.line(token.line + 1).number, token.realLine + 1);
 
   await wait();
-  assert.equal(scrollCalls.length, 1);
+  assert.equal(scrollCalls.length, 0);
 
-  scrollCalls.length = 0;
   view.previewMode.renderer.applyScroll(token.line);
   assert.equal(view.previewMode.renderer.lastScroll, token.realLine);
 

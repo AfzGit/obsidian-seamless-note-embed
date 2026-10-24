@@ -91,10 +91,18 @@ function setup() {
   }));
   metadata.start();
 
-  const thirdParty = new ThirdPartyOutlineIntegration(app, metadata);
+  const navigations = [];
+  const thirdParty = new ThirdPartyOutlineIntegration(
+    app,
+    metadata,
+    (file, line) => {
+      navigations.push({ file, line });
+      return true;
+    },
+  );
   thirdParty.start();
 
-  return { app, rootFile, metadata, thirdParty };
+  return { app, rootFile, metadata, thirdParty, navigations };
 }
 
 class FakeQuietNavigator {
@@ -271,7 +279,7 @@ class FakeSubtlePlugin {
 
 test("Subtle TOC shows embedded headings and keeps them safe to edit", async () => {
   document.body.innerHTML = "";
-  const { app, rootFile, metadata, thirdParty } = setup();
+  const { app, rootFile, metadata, thirdParty, navigations } = setup();
 
   const plugin = new FakeSubtlePlugin(app, rootFile);
   app.plugins.plugins["subtle-toc"] = plugin;
@@ -296,10 +304,13 @@ test("Subtle TOC shows embedded headings and keeps them safe to edit", async () 
   // remains the active one while scrolling through the embed.
   assert.equal(overlay.activeIndex, 0);
 
-  // Navigation is handled by HeadingNavigationBridge; the overlay integration
-  // only needs to preserve the plugin's normal navigate method.
+  // Source/live-preview navigation only resolves the embed line through
+  // CodeMirror, so the integration asks the bridge for an exact scroll.
   overlay.navigate(1);
   assert.equal(overlay.lastNavigate, 1);
+  assert.equal(navigations.length, 1);
+  assert.equal(navigations[0].file, rootFile);
+  assert.equal(navigations[0].line, overlay.headings[1].line);
 
   // A replacement overlay is patched by the wrapped sync().
   plugin.sync();

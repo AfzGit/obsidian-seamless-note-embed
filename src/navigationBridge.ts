@@ -43,7 +43,9 @@ function asRecord(value: object): Record<string, unknown> {
  * - `Editor.offsetToPos`/`setCursor`/`setSelection` cover offset-based search
  *   plugins such as Another Quick Switcher's header search.
  * - The preview renderer's `applyScroll` covers plugins that scroll directly.
- * - CodeMirror's `Text.line` covers plugins that bypass the Obsidian Editor.
+ * - CodeMirror's `Text.line` maps virtual line lookups for plugins that bypass
+ *   the Obsidian Editor, but deliberately does not treat those lookups as
+ *   navigation requests.
  */
 export class HeadingNavigationBridge {
   private readonly scroller: HeadingScroller;
@@ -96,6 +98,26 @@ export class HeadingNavigationBridge {
   onSettingsChanged(): void {
     this.scroller.cancel();
     this.patchAll();
+  }
+
+  /**
+   * Schedule an exact scroll for a virtual heading line. This is for plugins
+   * whose navigation path only performs a CodeMirror line lookup, which is
+   * intentionally treated as passive by the bridge.
+   */
+  navigateToLine(file: TFile, line: number): boolean {
+    if (!this.active) {
+      return false;
+    }
+
+    const token = this.resolveLine(file, line);
+    if (!token) {
+      return false;
+    }
+
+    this.rememberPending(token);
+    this.scroller.schedule(file, token.meta.key);
+    return true;
   }
 
   private patchAll(): boolean {
@@ -455,8 +477,9 @@ export class HeadingNavigationBridge {
         if (typeof line === "number") {
           const token = this.resolveLine(file, line);
           if (token) {
-            this.rememberPending(token);
-            this.scroller.schedule(file, token.meta.key);
+            // This is a position lookup, not a navigation request. Do not
+            // schedule a scroll here; plugins such as Subtle TOC use it while
+            // tracking the active heading and would otherwise steal scrolling.
             return token.offset;
           }
         }
@@ -606,8 +629,9 @@ export class HeadingNavigationBridge {
     ) {
       const token = this.resolveLine(file, line);
       if (token) {
-        this.rememberPending(token);
-        this.scroller.schedule(file, token.meta.key);
+        // Text.line() is also used for hit-testing and active-heading
+        // tracking. Map the line, but do not turn every lookup into a scroll
+        // request; that makes plugins fight over the viewport.
         return original.call(doc, token.realLine + 1, ...args);
       }
     }
