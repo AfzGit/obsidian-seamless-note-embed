@@ -9,6 +9,8 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
+dom.window.document.win = dom.window;
+dom.window.createEl = (tag) => dom.window.document.createElement(tag);
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.MouseEvent = dom.window.MouseEvent;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);

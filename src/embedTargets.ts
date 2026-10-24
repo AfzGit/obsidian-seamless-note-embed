@@ -50,7 +50,7 @@ export function splitLinktext(link: string): LinkParts {
 }
 
 // This is the same punctuation set Obsidian's `stripHeading` removes.
-const STRIP_HEADING_PUNCTUATION = /[!"#$%&()*+,.:;<=>?@^`{|}~\/\[\]\\\r\n]/g;
+const STRIP_HEADING_PUNCTUATION = /[!"#$%&()*+,.:;<=>?@^`{|}~/[\]\\\r\n]/g;
 
 /**
  * Normalize a heading the way Obsidian does when resolving `[[note#Heading]]`.

@@ -21,9 +21,8 @@ export function findMarkdownViewForFile(
   app: App,
   file: TFile,
 ): MarkdownViewLike | null {
-  const activeView = app.workspace.activeLeaf?.view as
-    | MarkdownViewLike
-    | undefined;
+  const recentLeaf = app.workspace.getMostRecentLeaf?.();
+  const activeView = recentLeaf?.view as MarkdownViewLike | undefined;
   if (activeView && isMarkdownViewForFile(activeView, file)) {
     return activeView;
   }

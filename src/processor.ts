@@ -249,7 +249,7 @@ export class EmbedHeadingProcessor {
    * often, so avoid walking every open note on each keystroke.
    */
   refreshActiveEditor(): void {
-    const leaf = this.app.workspace.activeLeaf;
+    const leaf = this.app.workspace.getMostRecentLeaf?.();
     const view = leaf?.view;
     if (!view || view.getViewType() !== "markdown") {
       return;
@@ -486,7 +486,7 @@ export class EmbedHeadingProcessor {
         return;
       }
 
-      let lineLevel = headingLevelFromClasses(node.classList);
+      let lineLevel = headingLevelFromClasses(Array.from(node.classList));
       if (
         lineLevel === null &&
         node.classList.contains("cm-line") &&
@@ -682,7 +682,10 @@ export class EmbedHeadingProcessor {
       return heading;
     }
 
-    const replacement = heading.ownerDocument.createElement(`h${level}`) as HTMLElement;
+    const win = heading.ownerDocument.win as Window & {
+      createEl: (tag: string) => HTMLElement;
+    };
+    const replacement = win.createEl(`h${level}`);
 
     for (const attribute of Array.from(heading.attributes)) {
       if (attribute.namespaceURI) {

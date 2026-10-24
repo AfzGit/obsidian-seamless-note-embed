@@ -8,6 +8,8 @@ const dom = new JSDOM("<!doctype html><html><body></body></html>", {
 });
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
+dom.window.document.win = dom.window;
+dom.window.createEl = (tag) => dom.window.document.createElement(tag);
 
 const require = createRequire(import.meta.url);
 const { HeadingNavigationBridge } = require("./.tmp/navigationBridge.cjs");
@@ -117,7 +119,7 @@ function makeSetup() {
   const view = new FakeView();
   const leaf = new FakeLeaf(view);
   const workspace = {
-    activeLeaf: leaf,
+    getMostRecentLeaf: () => leaf,
     getLeavesOfType: () => [leaf],
     iterateAllLeaves: (callback) => callback(leaf),
   };

@@ -2,6 +2,7 @@ import type { App, TFile } from "obsidian";
 import type { MetadataHeadingIntegration } from "./metadataHeadings";
 import type { OutlineEmbedMeta } from "./outlineKeys";
 
+/* eslint-disable @typescript-eslint/no-this-alias -- Patched methods need both their original dynamic this and the integration instance. */
 type AnyFunction = (...args: unknown[]) => unknown;
 
 interface AppWithPlugins extends App {
@@ -625,7 +626,7 @@ export class ThirdPartyOutlineIntegration {
     key: string,
     createWrapper: (original: AnyFunction) => AnyFunction,
   ): boolean {
-    const original = Reflect.get(target, key);
+    const original: unknown = Reflect.get(target, key);
     if (typeof original !== "function") {
       return false;
     }
@@ -657,3 +658,5 @@ export class ThirdPartyOutlineIntegration {
     this.methodPatches.length = 0;
   }
 }
+
+/* eslint-enable @typescript-eslint/no-this-alias -- Wrapper definitions are complete. */

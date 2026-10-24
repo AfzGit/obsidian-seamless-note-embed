@@ -5,6 +5,7 @@ import type {
   VirtualHeadingToken,
 } from "./metadataHeadings";
 
+/* eslint-disable @typescript-eslint/no-this-alias -- Patched methods need both their original dynamic this and the bridge instance. */
 type AnyFunction = (...args: unknown[]) => unknown;
 
 interface MarkdownViewLike {
@@ -138,11 +139,11 @@ export class HeadingNavigationBridge {
 
   private patchLeaf(): boolean {
     const workspace = this.app.workspace as unknown as {
-      activeLeaf?: object | null;
+      getMostRecentLeaf?: () => object | null;
       iterateAllLeaves?: (callback: (leaf: object) => void) => void;
     };
 
-    let leaf = workspace.activeLeaf ?? null;
+    let leaf = workspace.getMostRecentLeaf?.() ?? null;
     if (!leaf && typeof workspace.iterateAllLeaves === "function") {
       workspace.iterateAllLeaves((candidate) => {
         leaf = leaf ?? candidate;
@@ -816,7 +817,7 @@ export class HeadingNavigationBridge {
       return false;
     }
 
-    const original = Reflect.get(target, key);
+    const original: unknown = Reflect.get(target, key);
     if (typeof original !== "function") {
       return false;
     }
@@ -848,3 +849,5 @@ export class HeadingNavigationBridge {
     this.patches.length = 0;
   }
 }
+
+/* eslint-enable @typescript-eslint/no-this-alias -- Wrapper definitions are complete. */

@@ -6,7 +6,7 @@ import { OUTLINE_KEY_ATTRIBUTE, type OutlineEmbedMeta } from "./outlineKeys";
 
 interface OutlineItemLike {
   selfEl: HTMLElement;
-  heading: HeadingCache;
+  heading: OutlineHeading;
 }
 
 /**
@@ -47,7 +47,7 @@ function decorateItem(item: OutlineItemLike | null | undefined): void {
     return;
   }
 
-  const heading = item.heading as OutlineHeading | undefined;
+  const heading = item.heading;
   const meta = heading?.aeih;
 
   if (meta) {
@@ -211,13 +211,13 @@ export class OutlineIntegration {
 
     let leaves: WorkspaceLeafLike[];
     try {
-      leaves = workspace.getLeavesOfType("outline") as unknown as WorkspaceLeafLike[];
+      leaves = workspace.getLeavesOfType("outline");
     } catch {
       return;
     }
 
     for (const leaf of leaves) {
-      const view = leaf.view as unknown as OutlineViewLike;
+      const view = leaf.view as OutlineViewLike;
       if (
         !view ||
         !view.containerEl ||
@@ -381,7 +381,7 @@ export class OutlineIntegration {
         ? null
         : (markdownView: unknown): OutlineItemLike | null => {
             const active = boundFindActiveHeading(markdownView);
-            const heading = active?.heading as OutlineHeading | undefined;
+            const heading = active?.heading;
 
             // Fake headings all point at the embed's source line. Leaving one
             // highlighted would make the outline appear stuck while scrolling.

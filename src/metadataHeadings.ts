@@ -353,7 +353,7 @@ export class MetadataHeadingIntegration {
       );
     }
 
-    return (cache.headings ?? []) as OutlineHeading[];
+    return cache.headings ?? [];
   }
 
   private getAugmentedCache(
@@ -546,7 +546,7 @@ export class MetadataHeadingIntegration {
         "Seamless Note Embed: failed to build embedded outline headings",
         error,
       );
-      return (raw.headings ?? []) as OutlineHeading[];
+      return raw.headings ?? [];
     } finally {
       this.building -= 1;
     }

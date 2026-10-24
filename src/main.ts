@@ -208,7 +208,8 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const saved = (await this.loadData()) as Partial<PluginSettings> | null;
+    this.settings = { ...DEFAULT_SETTINGS, ...(saved ?? {}) };
   }
 
   async saveSettings(): Promise<void> {
@@ -282,7 +283,7 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
   ): void {
     body.classList.toggle(option.className, enabled);
     if (enabled) {
-      body.style.setProperty(option.printFlag, "1");
+      body.setCssProps({ [option.printFlag]: "1" });
     } else {
       body.style.removeProperty(option.printFlag);
     }
