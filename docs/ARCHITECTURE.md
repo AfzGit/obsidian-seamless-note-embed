@@ -15,13 +15,15 @@ This document explains how Seamless Note Embed works, which Obsidian internals i
 
 `src/main.ts` starts the integrations in this order:
 
-1. Load settings and apply CSS appearance classes.
+1. Load settings and apply CSS appearance classes when plugin features are enabled.
 2. Start `MetadataHeadingIntegration`, which wraps `metadataCache.getFileCache`.
 3. Start `HeadingNavigationBridge`, which patches navigation APIs.
 4. Create the processor and start the built-in `OutlineIntegration`.
 5. Start `ThirdPartyOutlineIntegration`.
-6. Register the Markdown post-processor, workspace/vault events, the refresh command, and the settings tab.
+6. Register the Markdown post-processor, workspace/vault events, the toggle/refresh commands, and the settings tab.
 7. On layout ready, refresh all integrations.
+
+The navigation bridge, built-in outline, and third-party integrations are started only when heading shifting is enabled (the master `pluginEnabled` switch and the heading-shifting `enabled` switch are both on). Toggling either off stops those patches and restores shifted headings. The master switch also clears the appearance classes; the metadata wrapper stays installed but returns the real cache.
 
 Unload order is deliberate:
 
@@ -272,7 +274,7 @@ Plugin ID: `subtle-toc`.
 - `display()` renders `Setting` objects into the tab for Obsidian < 1.13.
 - `getSettingDefinitions()` returns declarative definitions for Obsidian 1.13+, which also makes settings searchable.
 
-Toggles call `saveSettings()` and then either `reapplySettings()` (heading shifting) or `applyAppearanceSettings()` (CSS-only options). The refresh button calls `refreshHeadingLevels()`.
+Toggles call `saveSettings()` and then either `reapplySettings()` (heading shifting or the master switch) or `applyAppearanceSettings()` (CSS-only options). The refresh button calls `refreshHeadingLevels()`. The **Toggle plugin on/off** command flips `pluginEnabled`; **Toggle heading increments on/off** flips `enabled`.
 
 `src/main.ts` maps each appearance option to a body class and a print flag:
 

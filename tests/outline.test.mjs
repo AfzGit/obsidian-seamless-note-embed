@@ -818,6 +818,79 @@ test("clicking an embedded outline item scrolls to its rendered heading", async 
   integration.destroy();
 });
 
+test("retries an outline view that loads after startup", async () => {
+  document.body.innerHTML = "";
+
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const appleFile = { path: "apple.md", extension: "md" };
+  const containerEl = document.createElement("div");
+  document.body.appendChild(containerEl);
+
+  const placeholder = { containerEl };
+  const realView = {
+    file: rootFile,
+    containerEl,
+    cachedHeadingDom: [],
+    getHeadings() {
+      return [
+        heading("fruits 1", 1, 0),
+        heading("apple 1", 2, 2),
+      ];
+    },
+    update() {
+      this.cachedHeadingDom = this.getHeadings().map((item) =>
+        this.createItemDom(item),
+      );
+    },
+    createItemDom(item) {
+      const selfEl = document.createElement("div");
+      selfEl.className = "tree-item-self";
+      selfEl.textContent = item.heading;
+      containerEl.appendChild(selfEl);
+      return { selfEl, heading: item };
+    },
+  };
+
+  let loaded = false;
+  const app = {
+    workspace: {
+      activeLeaf: null,
+      getLeavesOfType: () => [{ view: loaded ? realView : placeholder }],
+      iterateAllLeaves() {},
+    },
+    metadataCache: {
+      getFileCache: (file) =>
+        file.path === rootFile.path
+          ? {
+              headings: [heading("fruits 1", 1, 0)],
+              embeds: [embed("apple.md", 1)],
+            }
+          : { headings: [heading("apple 1", 1, 0)], embeds: [] },
+      getFirstLinkpathDest: (path) => (path === "apple.md" ? appleFile : null),
+    },
+  };
+
+  const integration = new OutlineIntegration(app, () => ({ enabled: true }));
+  integration.start();
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(placeholder, "getHeadings"),
+    false,
+  );
+
+  loaded = true;
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(realView, "getHeadings"),
+    true,
+    "the deferred view should be patched after it loads",
+  );
+  assert.equal(realView.cachedHeadingDom.length, 2);
+
+  integration.destroy();
+});
+
 test("restores outline methods that live on the view prototype", () => {
   document.body.innerHTML = "";
 

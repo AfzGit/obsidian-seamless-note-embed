@@ -85,7 +85,7 @@ Submission checklist:
 4. The description is 250 characters or fewer, ends with a period, and does not start with "This is a plugin".
 5. `fundingUrl` is present only if you accept donations.
 6. `isDesktopOnly` is `false` because this plugin uses only browser/Obsidian APIs, not Node.js or Electron APIs.
-7. Command IDs do not repeat the plugin ID. The command ID is `refresh-embedded-heading-levels`; Obsidian prefixes it with the plugin ID automatically.
+7. Command IDs do not repeat the plugin ID. The command IDs are `toggle-plugin`, `toggle-heading-increments`, and `refresh-embedded-heading-levels`; Obsidian prefixes them with the plugin ID automatically.
 8. No sample code remains.
 9. No telemetry, network requests, dynamic ads, obfuscation, self-updating, or note/source-file writes. The plugin only saves its own settings to `data.json`.
 10. A GitHub release exists with `main.js`, `manifest.json`, and optional `styles.css` as assets.

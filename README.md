@@ -106,15 +106,22 @@ Copy the generated `main.js`, `manifest.json`, and `styles.css` into the plugin 
 
 ## Settings
 
+- **Enable plugin features** — master switch for heading shifting, outline entries, navigation, and appearance changes. Turning it off restores normal Obsidian behavior.
 - **Enable heading level shifting** — turns heading shifting on or off.
 - **Apply in live preview** — also shift embeds while editing. Reading view is always supported while heading shifting is enabled.
 - **Refresh now** — re-apply shifts to every open note.
 
-There is also a command, **Refresh embedded heading levels**, in the command palette. On Obsidian 1.13 and later, every setting is searchable from Obsidian's settings search.
+The command palette also has these commands:
+
+- **Toggle plugin on/off** — same as the master switch.
+- **Toggle heading increments on/off** — same as **Enable heading level shifting**.
+- **Refresh embedded heading levels** — re-apply shifts to every open note.
+
+On Obsidian 1.13 and later, every setting is searchable from Obsidian's settings search.
 
 ### Embed appearance
 
-These optional CSS-only settings work independently of heading shifting and are all off by default:
+While plugin features are enabled, these optional CSS-only settings work independently of heading shifting and are all off by default:
 
 - **Hide embed left line** — remove the colored line Obsidian draws on the left side of embedded notes.
 - **Remove embed indentation** — remove the extra left padding and indentation guides from embedded note content.
@@ -135,7 +142,7 @@ The line, indentation, filename, scrollbar, open-note button, and height-limit r
 
 For the Outline view, the plugin builds the same hierarchy from Obsidian's metadata cache: the note's own headings plus the headings of each embedded note, shifted recursively. It then augments the core Outline view's heading list. The Outline's existing rendering, search, folding, and navigation are reused; no separate sidebar is added.
 
-For third-party plugins, the same virtual headings are returned through a wrapped `metadataCache.getFileCache`. The wrapper is transparent to this plugin's own code, which always reads the real cache, so embedded headings are never counted twice. Each embedded heading gets a unique fractional line and a virtual offset, which preserve outline order and give offset-based navigation a stable token. A navigation bridge maps those tokens back to the embed's real line and then scrolls to the rendered heading. Turning off heading shifting makes the wrapper return the real cache, and unloading the plugin removes the wrapper and the bridge.
+For third-party plugins, the same virtual headings are returned through a wrapped `metadataCache.getFileCache`. The wrapper is transparent to this plugin's own code, which always reads the real cache, so embedded headings are never counted twice. Each embedded heading gets a unique fractional line and a virtual offset, which preserve outline order and give offset-based navigation a stable token. A navigation bridge maps those tokens back to the embed's real line and then scrolls to the rendered heading. Turning off heading shifting makes the wrapper return the real cache. Turning off plugin features also removes the appearance classes and stops the navigation, outline, and third-party patches.
 
 In Live Preview, the parent note's headings are CodeMirror lines rather than `<h1>` tags, and long notes are virtualized. The plugin therefore reads heading positions from the editor's current source and matches each rendered embed to its source position, so off-screen embeds do not disturb the outline order.
 

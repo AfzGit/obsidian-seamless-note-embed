@@ -8,6 +8,7 @@ import {
 import type AutoIncrementedEmbedHeadingsPlugin from "./main";
 
 export interface PluginSettings {
+  pluginEnabled: boolean;
   enabled: boolean;
   livePreview: boolean;
   hideEmbedLine: boolean;
@@ -20,6 +21,7 @@ export interface PluginSettings {
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
+  pluginEnabled: true,
   enabled: true,
   livePreview: true,
   hideEmbedLine: false,
@@ -99,6 +101,12 @@ export class AutoIncrementedEmbedHeadingsSettingTab extends PluginSettingTab {
   private generalRows(): SettingRow[] {
     return [
       this.toggleRow(
+        "Enable plugin features",
+        "Master switch for heading shifting, outline entries, navigation, and appearance changes. Turning it off restores normal Obsidian behavior.",
+        "pluginEnabled",
+        () => this.plugin.reapplySettings(),
+      ),
+      this.toggleRow(
         "Enable heading level shifting",
         "Shift the headings of embedded notes so they nest under the heading that contains the embed.",
         "enabled",
@@ -106,7 +114,7 @@ export class AutoIncrementedEmbedHeadingsSettingTab extends PluginSettingTab {
       ),
       this.toggleRow(
         "Apply in live preview",
-        "Also shift embeds while editing in live preview. Reading view is always supported when the plugin is enabled.",
+        "Also shift embeds while editing in live preview. Reading view is always supported while heading shifting is enabled.",
         "livePreview",
         () => this.plugin.reapplySettings(),
       ),

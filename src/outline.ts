@@ -4,6 +4,11 @@ import { HeadingScroller } from "./headingNavigation";
 import { buildOutlineHeadings, type OutlineHeading } from "./outlineHeadings";
 import { OUTLINE_KEY_ATTRIBUTE, type OutlineEmbedMeta } from "./outlineKeys";
 
+/** How long to wait for a deferred Outline view to finish loading. */
+const RETRY_DELAY_MS = 100;
+/** Bound the retries so a permanently deferred sidebar does not spin. */
+const MAX_RETRY_ATTEMPTS = 20;
+
 interface OutlineItemLike {
   selfEl: HTMLElement;
   heading: OutlineHeading;
@@ -98,6 +103,8 @@ export class OutlineIntegration {
   private readonly patches = new Map<OutlineViewLike, PatchState>();
   private readonly scroller: HeadingScroller;
   private refreshFrame: number | null = null;
+  private retryTimer: number | null = null;
+  private retryAttempts = 0;
   private active = false;
   private destroyed = false;
 
@@ -126,6 +133,8 @@ export class OutlineIntegration {
       window.cancelAnimationFrame(this.refreshFrame);
       this.refreshFrame = null;
     }
+
+    this.cancelRetry();
 
     const views = Array.from(this.patches.keys());
     for (const [view, state] of this.patches) {
@@ -216,15 +225,27 @@ export class OutlineIntegration {
       return;
     }
 
+    let needsRetry = false;
+
     for (const leaf of leaves) {
       const view = leaf.view as OutlineViewLike;
+      if (!view || !view.containerEl) {
+        needsRetry = true;
+        continue;
+      }
+
       if (
-        !view ||
-        !view.containerEl ||
         typeof view.getHeadings !== "function" ||
-        typeof view.update !== "function" ||
-        this.patches.has(view)
+        typeof view.update !== "function"
       ) {
+        // The workspace can restore an Outline leaf before its real view has
+        // loaded. Retry briefly so the first layout does not leave the outline
+        // showing only the parent note's headings.
+        needsRetry = true;
+        continue;
+      }
+
+      if (this.patches.has(view)) {
         continue;
       }
 
@@ -239,6 +260,36 @@ export class OutlineIntegration {
         }
       }
     }
+
+    if (needsRetry) {
+      this.scheduleRetry();
+    } else {
+      this.cancelRetry();
+    }
+  }
+
+  private scheduleRetry(): void {
+    if (this.retryTimer !== null || this.retryAttempts >= MAX_RETRY_ATTEMPTS) {
+      return;
+    }
+
+    this.retryTimer = window.setTimeout(() => {
+      this.retryTimer = null;
+      if (!this.active || !this.getSettings().enabled) {
+        return;
+      }
+
+      this.retryAttempts += 1;
+      this.refresh();
+    }, RETRY_DELAY_MS);
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer !== null) {
+      window.clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
+    this.retryAttempts = 0;
   }
 
   private pruneDetachedViews(): void {

@@ -1,4 +1,4 @@
-import { Plugin } from "obsidian";
+import { Notice, Plugin } from "obsidian";
 import { MetadataHeadingIntegration } from "./metadataHeadings";
 import { HeadingNavigationBridge } from "./navigationBridge";
 import { OutlineIntegration } from "./outline";
@@ -53,31 +53,41 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
     await this.loadSettings();
     this.applyAppearanceSettings();
 
-    this.metadataHeadings = new MetadataHeadingIntegration(
-      this.app,
-      () => this.settings,
-    );
+    this.metadataHeadings = new MetadataHeadingIntegration(this.app, () => ({
+      enabled: this.headingShiftingEnabled,
+    }));
     this.metadataHeadings.start();
 
     this.navigationBridge = new HeadingNavigationBridge(
       this.app,
       this.metadataHeadings,
     );
-    this.navigationBridge.start();
+    if (this.headingShiftingEnabled) {
+      this.navigationBridge.start();
+    }
 
-    this.processor = new EmbedHeadingProcessor(this.app, () => this.settings);
-    this.outline = new OutlineIntegration(this.app, () => this.settings);
-    this.outline.start();
+    this.processor = new EmbedHeadingProcessor(this.app, () => ({
+      enabled: this.headingShiftingEnabled,
+      livePreview: this.livePreviewEnabled,
+    }));
+    this.outline = new OutlineIntegration(this.app, () => ({
+      enabled: this.headingShiftingEnabled,
+    }));
+    if (this.headingShiftingEnabled) {
+      this.outline.start();
+    }
 
     this.thirdPartyOutlines = new ThirdPartyOutlineIntegration(
       this.app,
       this.metadataHeadings,
       (file, line) => this.navigationBridge.navigateToLine(file, line),
     );
-    this.thirdPartyOutlines.start();
+    if (this.headingShiftingEnabled) {
+      this.thirdPartyOutlines.start();
+    }
 
     this.registerMarkdownPostProcessor((element) => {
-      if (!this.settings.enabled) {
+      if (!this.headingShiftingEnabled) {
         return;
       }
 
@@ -171,11 +181,27 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
 
     this.registerEvent(
       this.app.workspace.on("editor-change", () => {
-        if (this.settings.enabled && this.settings.livePreview) {
+        if (this.headingShiftingEnabled && this.settings.livePreview) {
           this.processor.refreshActiveEditor();
         }
       }),
     );
+
+    this.addCommand({
+      id: "toggle-plugin",
+      name: "Toggle plugin on/off",
+      callback: () => {
+        void this.togglePlugin();
+      },
+    });
+
+    this.addCommand({
+      id: "toggle-heading-increments",
+      name: "Toggle heading increments on/off",
+      callback: () => {
+        void this.toggleHeadingIncrements();
+      },
+    });
 
     this.addCommand({
       id: "refresh-embedded-heading-levels",
@@ -216,6 +242,33 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
     await this.saveData(this.settings);
   }
 
+  /** Heading shifts require both the master switch and the shifting switch. */
+  get headingShiftingEnabled(): boolean {
+    return this.settings.pluginEnabled && this.settings.enabled;
+  }
+
+  get livePreviewEnabled(): boolean {
+    return this.headingShiftingEnabled && this.settings.livePreview;
+  }
+
+  async togglePlugin(): Promise<void> {
+    this.settings.pluginEnabled = !this.settings.pluginEnabled;
+    await this.saveSettings();
+    this.reapplySettings();
+    new Notice(
+      `Seamless Note Embed ${this.settings.pluginEnabled ? "enabled" : "disabled"}.`,
+    );
+  }
+
+  async toggleHeadingIncrements(): Promise<void> {
+    this.settings.enabled = !this.settings.enabled;
+    await this.saveSettings();
+    this.reapplySettings();
+    new Notice(
+      `Heading level shifting ${this.settings.enabled ? "enabled" : "disabled"}.`,
+    );
+  }
+
   /**
    * Reset every heading to its source level, then apply the current settings
    * again. Used when a setting changes or the user asks for a manual refresh.
@@ -234,6 +287,11 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
    * from heading shifting so they can be used without changing heading levels.
    */
   applyAppearanceSettings(): void {
+    if (!this.settings.pluginEnabled) {
+      this.clearAppearanceSettings();
+      return;
+    }
+
     if (typeof document === "undefined" || !document.body) {
       return;
     }
@@ -303,9 +361,17 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
   reapplySettings(): void {
     this.applyAppearanceSettings();
     this.metadataHeadings.onSettingsChanged();
-    this.navigationBridge.onSettingsChanged();
-    this.refreshHeadingLevels();
+
+    if (this.headingShiftingEnabled) {
+      this.navigationBridge.start();
+      this.thirdPartyOutlines.start();
+    } else {
+      this.navigationBridge.stop();
+      this.thirdPartyOutlines.stop();
+    }
+
+    this.processor.restoreAll();
+    this.processor.refreshAll();
     this.outline.onSettingsChanged();
-    this.thirdPartyOutlines.onSettingsChanged();
   }
 }
