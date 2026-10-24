@@ -100,19 +100,21 @@ The GitHub Actions workflow in `.github/workflows/release.yml` runs when a tag i
 
 1. Check out the tag.
 2. `npm ci`.
-3. `npm run build` (which type-checks first).
-4. Attest build provenance for `main.js` and `styles.css`.
-5. Create a **draft** GitHub release with `main.js`, `manifest.json`, and `styles.css`.
+3. Verify that the tag exactly matches the version in `manifest.json`.
+4. Run lint and tests.
+5. `npm run build` (which type-checks first).
+6. Attest build provenance for `main.js` and `styles.css`.
+7. Create a **published** GitHub release with `main.js`, `manifest.json`, and `styles.css`.
 
 Typical release:
 
 ```bash
 npm version minor
-git push
-git push --tags
+git push origin main
+git push origin --tags
 ```
 
-Then open the draft release on GitHub, verify the assets, and publish it. The tag and `manifest.json` version must match.
+The tag and `manifest.json` version must match. The release workflow publishes the release automatically because Obsidian's community plugin directory only recognizes published releases, not drafts.
 
 The CI workflow in `.github/workflows/lint.yml` runs `npm ci`, `npm run lint`, `npm test`, and `npm run build` on Node 20, 22, and 24 for every push and pull request.
 
