@@ -107,6 +107,92 @@ test("shifts headings by the parent heading level", () => {
   processor.destroy();
 });
 
+test("uses Reading View source sections when the parent heading is virtualized", () => {
+  setDocument(`
+    <div class="markdown-preview-view" id="root">
+      <div class="el-p">
+        <div class="markdown-embed" src="apple.md">
+          <div class="markdown-embed-content">
+            <h1>Summary</h1>
+            <h1>Notes</h1>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector("#root");
+  const embedSection = root.querySelector(".el-p");
+  const virtualizedHeadingSection = document.createElement("div");
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const appleFile = { path: "apple.md", extension: "md" };
+  const cacheByPath = new Map([
+    [
+      rootFile.path,
+      {
+        // The renderer sections, not the visible DOM, know that this heading
+        // exists above the embed.
+        headings: [],
+        embeds: [cacheEmbed("apple.md", 6)],
+      },
+    ],
+    [
+      appleFile.path,
+      {
+        headings: [cacheHeading("Summary", 1, 0), cacheHeading("Notes", 1, 82)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const view = {
+    file: rootFile,
+    getViewType: () => "markdown",
+    containerEl: root,
+    previewMode: {
+      renderer: {
+        sections: [
+          { start: { line: 5 }, level: 1, el: virtualizedHeadingSection },
+          { start: { line: 6 }, level: 7, el: embedSection },
+        ],
+      },
+    },
+  };
+
+  const app = {
+    workspace: {
+      activeLeaf: null,
+      iterateAllLeaves(callback) {
+        callback({ view });
+      },
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) => (path === "apple.md" ? appleFile : null),
+    },
+  };
+
+  const processor = makeProcessor(app);
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 2, text: "Summary" },
+    { level: 2, text: "Notes" },
+  ]);
+  assert.equal(root.querySelector(".markdown-embed").getAttribute("data-aeih-shift"), "1");
+  assert.deepEqual(
+    Array.from(root.querySelectorAll("[data-aeih-outline-key]")).map((heading) =>
+      JSON.parse(heading.getAttribute("data-aeih-outline-key")),
+    ),
+    [
+      ["fruits.md", [0], "apple.md", 0],
+      ["fruits.md", [0], "apple.md", 82],
+    ],
+  );
+
+  processor.destroy();
+});
+
 test("does not shift an embed that appears before any heading", () => {
   setDocument(`
     <div class="markdown-preview-view">

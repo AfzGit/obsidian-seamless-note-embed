@@ -1,6 +1,6 @@
 import type { App, EmbedCache, HeadingCache, MarkdownView } from "obsidian";
 import { filterSection, getFileData, resolveEmbedData } from "./embedData";
-import { findMatchingHeading } from "./embedTargets";
+import { findMatchingHeading, splitLinktext } from "./embedTargets";
 import {
   headingLevelFromClasses,
   headingLevelFromTagName,
@@ -49,12 +49,34 @@ interface HeadingScopeContext {
   embedPath: number[];
   headings: HeadingCache[] | null;
   cursor: { value: number };
+  /**
+   * Source heading positions for this scope. Reading View may virtualize the
+   * heading above an embed out of the DOM, so this is used to compute the
+   * embed's parent level from source instead of the visible DOM.
+   */
+  sourceHeadings?: HeadingAtLine[] | null;
+  /** Resolvable note embeds in this scope, in source order. */
+  noteEmbeds?: EmbedCache[] | null;
+  /** Cursor for matching rendered nested embeds to their source entries. */
+  embedCursor?: { value: number };
+  /** Source line for top-level Reading View embeds, when the renderer exposes it. */
+  embedLines?: Map<HTMLElement, number>;
 }
 
 interface LivePreviewEmbedInfo {
   level: number;
   /** Index in the note's metadata embed list, so keys match the outline. */
   index: number;
+}
+
+interface PreviewSectionLike {
+  start?: { line?: number; col?: number; offset?: number } | null;
+  level?: number;
+  el?: HTMLElement | null;
+}
+
+interface PreviewRendererLike {
+  sections?: PreviewSectionLike[];
 }
 
 function isElement(value: unknown): value is HTMLElement {
@@ -284,7 +306,9 @@ export class EmbedHeadingProcessor {
 
   private processReadingView(root: HTMLElement): void {
     const view = this.findMarkdownView(root);
-    const rootPath = view?.file?.path ?? null;
+    const rootFile = view?.file;
+    const rootPath = rootFile?.path ?? null;
+    const fileData = rootFile ? getFileData(this.app, rootFile) : null;
 
     this.processScope(root, 0, {
       isRoot: true,
@@ -293,6 +317,12 @@ export class EmbedHeadingProcessor {
       embedPath: [],
       headings: null,
       cursor: { value: 0 },
+      sourceHeadings: this.getReadingViewSourceHeadings(view),
+      noteEmbeds: fileData
+        ? this.getNoteEmbeds(fileData.path, fileData.embeds)
+        : [],
+      embedCursor: { value: 0 },
+      embedLines: this.getReadingViewEmbedLines(root, view),
     });
   }
 
@@ -312,7 +342,13 @@ export class EmbedHeadingProcessor {
 
     const visit = (node: HTMLElement): void => {
       if (isMarkdownEmbed(node)) {
-        const counted = this.processEmbed(node, currentLevel, context, embedIndex);
+        const counted = this.processEmbed(
+          node,
+          currentLevel,
+          parentLevel,
+          context,
+          embedIndex,
+        );
         if (counted) {
           embedIndex += 1;
         }
@@ -374,13 +410,13 @@ export class EmbedHeadingProcessor {
   private processEmbed(
     embed: HTMLElement,
     parentLevel: number,
+    scopeParentLevel: number,
     parentContext: HeadingScopeContext,
     embedIndex: number,
   ): boolean {
-    embed.setAttribute(SHIFT_ATTRIBUTE, String(parentLevel));
-
     let sourcePath = parentContext.sourcePath;
     let headings: HeadingCache[] | null = null;
+    let noteEmbeds: EmbedCache[] = [];
     let counted = false;
     const src = embed.getAttribute("src");
 
@@ -395,6 +431,9 @@ export class EmbedHeadingProcessor {
           const section = filterSection(resolved.data, resolved.subpath);
           sourcePath = resolved.data.path;
           headings = section ? section.headings : [];
+          noteEmbeds = section
+            ? this.getNoteEmbeds(sourcePath, section.embeds)
+            : [];
         }
       } catch (error) {
         console.error(
@@ -404,17 +443,260 @@ export class EmbedHeadingProcessor {
       }
     }
 
+    // Reading View virtualizes off-screen sections, so the heading above an
+    // embed may not be in the DOM. Prefer the source position for note embeds;
+    // the visible DOM remains the fallback for canvas cards and tests. Do not
+    // consume a source embed slot for media or unresolved links.
+    const sourceLine = counted
+      ? this.resolveEmbedSourceLine(embed, parentContext, embedIndex)
+      : null;
+    const sourceParentLevel =
+      sourceLine !== null && parentContext.sourceHeadings
+        ? shiftHeadingLevel(
+            nearestPrecedingHeadingLevel(parentContext.sourceHeadings, sourceLine),
+            scopeParentLevel,
+          )
+        : null;
+    const effectiveParentLevel = sourceParentLevel ?? parentLevel;
+    embed.setAttribute(SHIFT_ATTRIBUTE, String(effectiveParentLevel));
+
     const content = directEmbedContent(embed) ?? embed;
-    this.processScope(content, parentLevel, {
+    this.processScope(content, effectiveParentLevel, {
       isRoot: false,
       rootPath: parentContext.rootPath,
       sourcePath,
       embedPath: [...parentContext.embedPath, embedIndex],
       headings,
       cursor: { value: 0 },
+      sourceHeadings: headings
+        ? headings.map((heading) => ({
+            line: heading.position.start.line,
+            level: heading.level,
+          }))
+        : null,
+      noteEmbeds,
+      embedCursor: { value: 0 },
     });
 
     return counted;
+  }
+
+  /**
+   * Read source heading positions from the Reading View renderer. Obsidian
+   * keeps a section list for the whole note even when only part of it is in
+   * the DOM, which is exactly what is needed for a virtualized parent heading.
+   */
+  private getReadingViewSourceHeadings(
+    view: MarkdownView | null,
+  ): HeadingAtLine[] | null {
+    const renderer = this.getPreviewRenderer(view);
+    const sections = renderer?.sections;
+    if (Array.isArray(sections)) {
+      const headings: HeadingAtLine[] = [];
+      for (const section of sections) {
+        const line = section.start?.line;
+        const level = section.level;
+        if (
+          typeof line === "number" &&
+          typeof level === "number" &&
+          level >= 1 &&
+          level <= 6
+        ) {
+          headings.push({ line, level });
+        }
+      }
+
+      if (headings.length > 0) {
+        return headings.sort((left, right) => left.line - right.line);
+      }
+    }
+
+    const file = view?.file;
+    if (!file) {
+      return null;
+    }
+
+    const data = getFileData(this.app, file);
+    return data
+      ? data.headings.map((heading) => ({
+          line: heading.position.start.line,
+          level: heading.level,
+        }))
+      : null;
+  }
+
+  /**
+   * Map each rendered top-level embed to its source line. The renderer keeps
+   * section elements for virtualized content, so this works even when the
+   * embed's parent heading is not currently mounted.
+   */
+  private getReadingViewEmbedLines(
+    root: HTMLElement,
+    view: MarkdownView | null,
+  ): Map<HTMLElement, number> {
+    const lines = new Map<HTMLElement, number>();
+    const renderer = this.getPreviewRenderer(view);
+    const sections = renderer?.sections;
+    if (!Array.isArray(sections) || sections.length === 0) {
+      return lines;
+    }
+
+    const sectionByElement = new Map<HTMLElement, PreviewSectionLike>();
+    for (const section of sections) {
+      if (section.el) {
+        sectionByElement.set(section.el, section);
+      }
+    }
+
+    for (const embed of Array.from(root.querySelectorAll<HTMLElement>(EMBED_SELECTOR))) {
+      if (embed.closest(EMBED_CONTENT_SELECTOR)) {
+        continue;
+      }
+
+      let current: HTMLElement | null = embed;
+      while (current && current !== root) {
+        const section = sectionByElement.get(current);
+        const line = section?.start?.line;
+        if (typeof line === "number") {
+          lines.set(embed, line);
+          break;
+        }
+        current = current.parentElement;
+      }
+    }
+
+    return lines;
+  }
+
+  private getPreviewRenderer(view: MarkdownView | null): PreviewRendererLike | null {
+    if (!view) {
+      return null;
+    }
+
+    try {
+      const previewMode = view.previewMode as unknown as
+        | { renderer?: unknown }
+        | undefined;
+      const renderer = previewMode?.renderer;
+      return typeof renderer === "object" && renderer !== null
+        ? renderer
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Resolvable note embeds in source order, matching outline indices. */
+  private getNoteEmbeds(
+    sourcePath: string | null,
+    embeds: readonly EmbedCache[],
+  ): EmbedCache[] {
+    if (!sourcePath) {
+      return [];
+    }
+
+    const noteEmbeds: EmbedCache[] = [];
+    for (const embed of embeds) {
+      try {
+        if (resolveEmbedData(this.app, embed.link, sourcePath)) {
+          noteEmbeds.push(embed);
+        }
+      } catch {
+        // A temporarily unresolved embed is not part of the rendered note
+        // embed sequence.
+      }
+    }
+
+    return noteEmbeds.sort(
+      (left, right) =>
+        left.position.start.line - right.position.start.line ||
+        left.position.start.col - right.position.start.col,
+    );
+  }
+
+  /**
+   * Find the source line of a rendered embed. Top-level Reading View embeds
+   * come from the renderer's section list. Nested embeds are matched against
+   * their containing note's source embeds by link, with a cursor so duplicate
+   * links keep their order when earlier embeds are virtualized away.
+   */
+  private resolveEmbedSourceLine(
+    embed: HTMLElement,
+    context: HeadingScopeContext,
+    embedIndex: number,
+  ): number | null {
+    const explicit = context.embedLines?.get(embed);
+    if (typeof explicit === "number") {
+      return explicit;
+    }
+
+    const noteEmbeds = context.noteEmbeds;
+    if (!noteEmbeds || noteEmbeds.length === 0) {
+      return null;
+    }
+
+    const cursor = context.embedCursor ?? { value: 0 };
+    const start = Math.max(0, cursor.value);
+    const src = embed.getAttribute("src");
+
+    if (src) {
+      for (let index = start; index < noteEmbeds.length; index++) {
+        if (this.embedLinkMatches(noteEmbeds[index].link, src, context.sourcePath)) {
+          cursor.value = index + 1;
+          return noteEmbeds[index].position.start.line;
+        }
+      }
+    }
+
+    const fallback =
+      embedIndex >= 0 && embedIndex < noteEmbeds.length ? embedIndex : start;
+    if (fallback >= 0 && fallback < noteEmbeds.length) {
+      cursor.value = fallback + 1;
+      return noteEmbeds[fallback].position.start.line;
+    }
+
+    return null;
+  }
+
+  private embedLinkMatches(
+    cachedLink: string,
+    renderedLink: string,
+    sourcePath: string | null,
+  ): boolean {
+    if (cachedLink === renderedLink) {
+      return true;
+    }
+
+    try {
+      const cached = splitLinktext(cachedLink);
+      const rendered = splitLinktext(renderedLink);
+      if (cached.subpath !== rendered.subpath) {
+        return false;
+      }
+
+      if (
+        cached.path === rendered.path ||
+        cached.path.replace(/\.md$/i, "") === rendered.path.replace(/\.md$/i, "")
+      ) {
+        return true;
+      }
+
+      if (!sourcePath || !this.app.metadataCache) {
+        return false;
+      }
+
+      const cachedFile = this.app.metadataCache.getFirstLinkpathDest(
+        cached.path,
+        sourcePath,
+      );
+      const renderedFile = this.app.metadataCache.getFirstLinkpathDest(
+        rendered.path,
+        sourcePath,
+      );
+      return !!cachedFile && cachedFile === renderedFile;
+    } catch {
+      return false;
+    }
   }
 
   private assignOutlineKey(
@@ -482,7 +764,8 @@ export class EmbedHeadingProcessor {
           index = fallbackEmbedIndex;
           fallbackEmbedIndex -= 1;
         }
-        this.processEmbed(node, info?.level ?? currentLevel, context, index);
+        const level = info?.level ?? currentLevel;
+        this.processEmbed(node, level, level, context, index);
         return;
       }
 

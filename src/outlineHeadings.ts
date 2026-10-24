@@ -18,6 +18,15 @@ export interface OutlineFileSource {
 /** Resolve a link path to the full metadata of the target note. */
 export type ResolveOutlineFile = (path: string, sourcePath: string) => EmbedData | null;
 
+export interface BuildOutlineOptions {
+  /**
+   * Shift embedded headings under the heading that contains the embed.
+   * Defaults to true. When false, embedded headings are still included but
+   * keep their original levels.
+   */
+  shift?: boolean;
+}
+
 interface OutlineEvent {
   kind: "heading" | "embed";
   line: number;
@@ -85,16 +94,19 @@ function makeChainKey(path: string, subpath: string): string {
 /**
  * Build the flat heading list consumed by Obsidian's core Outline view.
  *
- * The note's own headings keep their original levels. Every heading inside an
- * embed is shifted by the level of the nearest heading above that embed, and
- * nested embeds shift cumulatively. The returned fake headings point at the
- * top-level embed's source line so the core outline can navigate to the embed
- * without any changes to the vault.
+ * The note's own headings keep their original levels. By default, every
+ * heading inside an embed is shifted by the level of the nearest heading above
+ * that embed, and nested embeds shift cumulatively. Pass `shift: false` to
+ * include embedded headings without changing their levels. The returned fake
+ * headings point at the top-level embed's source line so the core outline can
+ * navigate to the embed without any changes to the vault.
  */
 export function buildOutlineHeadings(
   root: OutlineFileSource,
   resolveFile: ResolveOutlineFile,
+  options: BuildOutlineOptions = {},
 ): OutlineHeading[] {
+  const shift = options.shift ?? true;
   const output: OutlineHeading[] = [];
   let currentLevel = 0;
   let noteEmbedIndex = 0;
@@ -119,6 +131,7 @@ export function buildOutlineHeadings(
         rootPath: root.path,
         output,
         resolveFile,
+        shift,
       });
 
       // Only resolved note embeds occupy an index in the DOM's embed path.
@@ -147,6 +160,7 @@ interface AppendEmbeddedOptions {
   rootPath: string;
   output: OutlineHeading[];
   resolveFile: ResolveOutlineFile;
+  shift: boolean;
 }
 
 /** Returns true when the target is a note, so it occupies a DOM embed index. */
@@ -161,6 +175,7 @@ function appendEmbeddedHeadings(options: AppendEmbeddedOptions): boolean {
     rootPath,
     output,
     resolveFile,
+    shift,
   } = options;
 
   const { path, subpath } = splitLinktext(embed.link);
@@ -185,7 +200,9 @@ function appendEmbeddedHeadings(options: AppendEmbeddedOptions): boolean {
   for (const event of mergeEvents(section.headings, section.embeds)) {
     if (event.kind === "heading" && event.heading) {
       const original = event.heading;
-      const level = shiftHeadingLevel(original.level, parentLevel);
+      const level = shift
+        ? shiftHeadingLevel(original.level, parentLevel)
+        : original.level;
       const meta: OutlineEmbedMeta = {
         key: makeOutlineKey({
           rootPath,
@@ -230,6 +247,7 @@ function appendEmbeddedHeadings(options: AppendEmbeddedOptions): boolean {
         rootPath,
         output,
         resolveFile,
+        shift,
       });
 
       if (counted) {

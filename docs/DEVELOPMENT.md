@@ -154,6 +154,7 @@ Test at least:
 - A link to an embedded heading and Another Quick Switcher's header search.
 - Hover previews with appearance settings enabled.
 - PDF export with appearance settings enabled.
+- Disabling heading increments: headings must return to their original levels, while the built-in Outline and third-party outlines still show the embedded headings.
 - Disabling the plugin: headings must return to their original levels and appearance classes must be removed.
 
 ## Common pitfalls

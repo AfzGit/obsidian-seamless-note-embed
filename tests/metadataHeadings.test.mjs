@@ -143,6 +143,32 @@ test("exposes shifted embedded headings through the metadata cache", () => {
   assert.equal(app.metadataCache.getFileCache(rootFile).headings.length, 2);
 });
 
+test("exposes unshifted embedded headings when heading shifting is disabled", () => {
+  const { rootFile, app } = makeFixture();
+  const integration = new MetadataHeadingIntegration(app, () => ({
+    enabled: true,
+    shift: false,
+  }));
+
+  integration.start();
+
+  const cache = app.metadataCache.getFileCache(rootFile);
+  assert.deepEqual(
+    cache.headings.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "fruits 1", level: 1 },
+      { text: "apple 1", level: 1 },
+      { text: "apple 2", level: 2 },
+      { text: "fruits 2", level: 2 },
+    ],
+  );
+  assert.equal(cache.headings[1].aeih.embedLine, 1);
+  assert.ok(cache.headings[1].position.start.offset >= 2 ** 40);
+
+  integration.stop();
+  integration.destroy();
+});
+
 test("leaves the metadata cache alone when the plugin is disabled", () => {
   const { rootFile, app } = makeFixture();
   const integration = new MetadataHeadingIntegration(app, () => ({

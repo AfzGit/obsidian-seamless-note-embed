@@ -14,7 +14,10 @@ import {
 import type { OutlineEmbedMeta } from "./outlineKeys";
 
 export interface MetadataHeadingSettings {
+  /** Master switch. When false the wrapper returns the real cache. */
   enabled: boolean;
+  /** Shift embedded heading levels. Defaults to true. */
+  shift?: boolean;
 }
 
 /**
@@ -512,35 +515,39 @@ export class MetadataHeadingIntegration {
 
     this.building += 1;
     try {
-      return buildOutlineHeadings(source, (path, sourcePath) => {
-        try {
-          const target = this.app.metadataCache.getFirstLinkpathDest(
-            path,
-            sourcePath,
-          );
-          if (!target || target.extension !== "md") {
+      return buildOutlineHeadings(
+        source,
+        (path, sourcePath) => {
+          try {
+            const target = this.app.metadataCache.getFirstLinkpathDest(
+              path,
+              sourcePath,
+            );
+            if (!target || target.extension !== "md") {
+              return null;
+            }
+
+            const targetCache = getRawFileCache(this.app, target);
+            if (!targetCache) {
+              return null;
+            }
+
+            return {
+              file: target,
+              path: target.path,
+              headings: targetCache.headings ?? [],
+              embeds: targetCache.embeds ?? [],
+            };
+          } catch (error) {
+            console.error(
+              "Seamless Note Embed: failed to resolve an embed for the outline",
+              error,
+            );
             return null;
           }
-
-          const targetCache = getRawFileCache(this.app, target);
-          if (!targetCache) {
-            return null;
-          }
-
-          return {
-            file: target,
-            path: target.path,
-            headings: targetCache.headings ?? [],
-            embeds: targetCache.embeds ?? [],
-          };
-        } catch (error) {
-          console.error(
-            "Seamless Note Embed: failed to resolve an embed for the outline",
-            error,
-          );
-          return null;
-        }
-      });
+        },
+        { shift: this.getSettings().shift ?? true },
+      );
     } catch (error) {
       console.error(
         "Seamless Note Embed: failed to build embedded outline headings",

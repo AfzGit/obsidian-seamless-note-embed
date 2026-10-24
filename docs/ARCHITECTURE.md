@@ -23,7 +23,7 @@ This document explains how Seamless Note Embed works, which Obsidian internals i
 6. Register the Markdown post-processor, workspace/vault events, the toggle/refresh commands, and the settings tab.
 7. On layout ready, refresh all integrations.
 
-The navigation bridge, built-in outline, and third-party integrations are started only when heading shifting is enabled (the master `pluginEnabled` switch and the heading-shifting `enabled` switch are both on). Toggling either off stops those patches and restores shifted headings. The master switch also clears the appearance classes; the metadata wrapper stays installed but returns the real cache.
+The navigation bridge, built-in outline, and third-party integrations are started whenever the master `pluginEnabled` switch is on. They stay active when the heading-shifting `enabled` switch is off, but then use the embedded notes' original levels. Turning the master switch off stops those patches, clears the appearance classes, and restores normal heading levels. The metadata wrapper stays installed but returns the real cache when the master switch is off.
 
 Unload order is deliberate:
 
@@ -72,6 +72,8 @@ The navigation bridge is removed before the metadata wrapper so no patched navig
 
 - `currentLevel`: the effective level of the most recent heading.
 - `embedIndex`: the index of the next note embed in this scope.
+
+Reading View can virtualize a heading out of the DOM while keeping the embed below it rendered. To handle that, `processReadingView()` also reads `view.previewMode.renderer.sections`. The section list keeps the source line and heading level for the whole note, even for unmounted sections. Each top-level embed is mapped to its section line by walking its ancestor elements to a known `section.el`; the nearest preceding heading is then computed from source. Nested embeds fall back to matching the rendered `src` against the containing note's source embeds, with a cursor so duplicate links keep their order when earlier embeds are virtualized.
 
 When it finds an `<h1>`–`<h6>`:
 
@@ -148,7 +150,7 @@ Quiet Outline, Subtle TOC, and other plugins read headings from `metadataCache.g
 
 ### Raw-cache registry
 
-The wrapper calls the original bound getter, then returns a shallow copy of the cache with `headings` replaced by the combined list. The plugin's own code must never read the wrapped method, or an embed would be counted twice. `src/rawMetadata.ts` stores the original getter in a `WeakMap<App, RawFileCacheGetter>`. `getRawFileCache()` always uses that getter when available.
+The wrapper calls the original bound getter, then returns a shallow copy of the cache with `headings` replaced by the combined list. The plugin's own code must never read the wrapped method, or an embed would be counted twice. `src/rawMetadata.ts` stores the original getter in a `WeakMap<App, RawFileCacheGetter>`. `getRawFileCache()` always uses that getter when available. The heading-shifting switch is passed to `buildOutlineHeadings()` as `shift`; when it is off, the wrapper still adds embedded headings but leaves their levels unchanged.
 
 ### Cache fingerprint
 

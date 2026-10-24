@@ -110,7 +110,7 @@ export class OutlineIntegration {
 
   constructor(
     private readonly app: App,
-    private readonly getSettings: () => { enabled: boolean },
+    private readonly getSettings: () => { enabled: boolean; shift?: boolean },
   ) {
     this.scroller = new HeadingScroller(app);
   }
@@ -375,18 +375,25 @@ export class OutlineIntegration {
           return useFallbackHeadings();
         }
 
-        const combined = buildOutlineHeadings(fileData, (path, sourcePath) => {
-          try {
-            const targetFile = this.app.metadataCache.getFirstLinkpathDest(path, sourcePath);
-            return targetFile ? getFileData(this.app, targetFile) : null;
-          } catch (error) {
-            console.error(
-              "Seamless Note Embed: failed to resolve an embed for the outline",
-              error,
-            );
-            return null;
-          }
-        });
+        const combined = buildOutlineHeadings(
+          fileData,
+          (path, sourcePath) => {
+            try {
+              const targetFile = this.app.metadataCache.getFirstLinkpathDest(
+                path,
+                sourcePath,
+              );
+              return targetFile ? getFileData(this.app, targetFile) : null;
+            } catch (error) {
+              console.error(
+                "Seamless Note Embed: failed to resolve an embed for the outline",
+                error,
+              );
+              return null;
+            }
+          },
+          { shift: this.getSettings().shift ?? true },
+        );
 
         for (const heading of combined) {
           if (heading.aeih) {

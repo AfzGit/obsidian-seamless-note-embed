@@ -147,6 +147,53 @@ test("builds outline headings with shifted embed levels", () => {
   assert.equal(result[3], root.headings[1]);
 });
 
+test("includes embedded headings at original levels when shifting is disabled", () => {
+  const files = new Map([
+    [
+      "apple.md",
+      {
+        path: "apple.md",
+        headings: [heading("apple 1", 1, 0), heading("apple 2", 2, 2)],
+        embeds: [embed("orange.md", 4)],
+      },
+    ],
+    [
+      "orange.md",
+      {
+        path: "orange.md",
+        headings: [heading("orange 1", 1, 0), heading("orange 2", 2, 2)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const root = {
+    path: "fruits.md",
+    headings: [heading("fruits 1", 1, 0), heading("fruits 2", 2, 5)],
+    embeds: [embed("apple.md", 1)],
+  };
+
+  const result = buildOutlineHeadings(root, makeResolver(files), {
+    shift: false,
+  });
+  assert.deepEqual(
+    result.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "fruits 1", level: 1 },
+      { text: "apple 1", level: 1 },
+      { text: "apple 2", level: 2 },
+      { text: "orange 1", level: 1 },
+      { text: "orange 2", level: 2 },
+      { text: "fruits 2", level: 2 },
+    ],
+  );
+
+  // The entries still carry navigation metadata; only their levels are
+  // unchanged.
+  assert.equal(result[1].aeih.targetLine, 0);
+  assert.deepEqual(result[3].aeih.embedPath, [0, 0]);
+});
+
 test("media embeds do not occupy outline embed indices", () => {
   const files = new Map([
     [
@@ -488,6 +535,91 @@ test("patches an outline view and restores it when stopped", () => {
   );
   assert.equal(view.cachedHeadingDom.length, 1);
   assert.equal(view.cachedHeadingDom[0].heading.heading, "fruits 1");
+
+  integration.destroy();
+});
+
+test("keeps embedded outline entries when heading shifting is disabled", () => {
+  document.body.innerHTML = "";
+
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const appleFile = { path: "apple.md", extension: "md" };
+  const cacheByPath = new Map([
+    [
+      rootFile.path,
+      {
+        headings: [heading("fruits 1", 1, 0)],
+        embeds: [embed("apple.md", 1)],
+      },
+    ],
+    [
+      appleFile.path,
+      {
+        headings: [heading("apple 1", 1, 0), heading("apple 2", 2, 2)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const containerEl = document.createElement("div");
+  document.body.appendChild(containerEl);
+
+  const view = {
+    file: rootFile,
+    containerEl,
+    cachedHeadingDom: [],
+    getHeadings() {
+      return cacheByPath.get(rootFile.path).headings;
+    },
+    update() {
+      this.cachedHeadingDom = this.getHeadings().map((item) =>
+        this.createItemDom(item),
+      );
+    },
+    createItemDom(item) {
+      const selfEl = document.createElement("div");
+      selfEl.className = "tree-item-self";
+      selfEl.textContent = item.heading;
+      containerEl.appendChild(selfEl);
+      return { selfEl, heading: item };
+    },
+  };
+
+  const app = {
+    workspace: {
+      activeLeaf: null,
+      getLeavesOfType: () => [{ view }],
+      iterateAllLeaves() {},
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) => (path === "apple.md" ? appleFile : null),
+    },
+  };
+
+  const integration = new OutlineIntegration(app, () => ({
+    enabled: true,
+    shift: false,
+  }));
+  integration.start();
+
+  assert.deepEqual(
+    view.cachedHeadingDom.map((item) => ({
+      text: item.heading.heading,
+      level: item.heading.level,
+    })),
+    [
+      { text: "fruits 1", level: 1 },
+      { text: "apple 1", level: 1 },
+      { text: "apple 2", level: 2 },
+    ],
+  );
+  assert.equal(
+    view.cachedHeadingDom.filter((item) =>
+      item.selfEl.hasAttribute("data-aeih-outline-key"),
+    ).length,
+    2,
+  );
 
   integration.destroy();
 });

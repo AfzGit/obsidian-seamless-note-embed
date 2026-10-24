@@ -54,7 +54,8 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
     this.applyAppearanceSettings();
 
     this.metadataHeadings = new MetadataHeadingIntegration(this.app, () => ({
-      enabled: this.headingShiftingEnabled,
+      enabled: this.settings.pluginEnabled,
+      shift: this.settings.enabled,
     }));
     this.metadataHeadings.start();
 
@@ -62,7 +63,7 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
       this.app,
       this.metadataHeadings,
     );
-    if (this.headingShiftingEnabled) {
+    if (this.settings.pluginEnabled) {
       this.navigationBridge.start();
     }
 
@@ -71,9 +72,10 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
       livePreview: this.livePreviewEnabled,
     }));
     this.outline = new OutlineIntegration(this.app, () => ({
-      enabled: this.headingShiftingEnabled,
+      enabled: this.settings.pluginEnabled,
+      shift: this.settings.enabled,
     }));
-    if (this.headingShiftingEnabled) {
+    if (this.settings.pluginEnabled) {
       this.outline.start();
     }
 
@@ -82,7 +84,7 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
       this.metadataHeadings,
       (file, line) => this.navigationBridge.navigateToLine(file, line),
     );
-    if (this.headingShiftingEnabled) {
+    if (this.settings.pluginEnabled) {
       this.thirdPartyOutlines.start();
     }
 
@@ -362,7 +364,10 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
     this.applyAppearanceSettings();
     this.metadataHeadings.onSettingsChanged();
 
-    if (this.headingShiftingEnabled) {
+    // Outline entries and navigation are useful even when heading increments
+    // are off; they simply use the embedded notes' original levels. Only the
+    // master switch stops these integrations.
+    if (this.settings.pluginEnabled) {
       this.navigationBridge.start();
       this.thirdPartyOutlines.start();
     } else {
