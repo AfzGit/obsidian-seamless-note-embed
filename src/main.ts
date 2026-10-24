@@ -5,7 +5,7 @@ import { OutlineIntegration } from "./outline";
 import { EmbedHeadingProcessor, findRenderRoot } from "./processor";
 import { ThirdPartyOutlineIntegration } from "./thirdPartyOutlines";
 import {
-  AutoIncrementedEmbedHeadingsSettingTab,
+  SeamlessNoteEmbedSettingTab,
   DEFAULT_SETTINGS,
   PluginSettings,
 } from "./settings";
@@ -41,7 +41,7 @@ const APPEARANCE_OPTIONS = {
   },
 } as const;
 
-export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
+export default class SeamlessNoteEmbedPlugin extends Plugin {
   settings!: PluginSettings;
   private processor!: EmbedHeadingProcessor;
   private outline!: OutlineIntegration;
@@ -213,7 +213,7 @@ export default class AutoIncrementedEmbedHeadingsPlugin extends Plugin {
       },
     });
 
-    this.addSettingTab(new AutoIncrementedEmbedHeadingsSettingTab(this.app, this));
+    this.addSettingTab(new SeamlessNoteEmbedSettingTab(this.app, this));
 
     this.app.workspace.onLayoutReady(() => {
       this.processor.refreshAll();

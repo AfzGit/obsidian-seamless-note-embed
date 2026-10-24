@@ -5,7 +5,7 @@ import {
   type SettingDefinition,
   type SettingDefinitionItem,
 } from "obsidian";
-import type AutoIncrementedEmbedHeadingsPlugin from "./main";
+import type SeamlessNoteEmbedPlugin from "./main";
 
 export interface PluginSettings {
   pluginEnabled: boolean;
@@ -43,10 +43,10 @@ interface SettingRow {
   addControl: (setting: Setting) => void;
 }
 
-export class AutoIncrementedEmbedHeadingsSettingTab extends PluginSettingTab {
+export class SeamlessNoteEmbedSettingTab extends PluginSettingTab {
   constructor(
     app: App,
-    private readonly plugin: AutoIncrementedEmbedHeadingsPlugin,
+    private readonly plugin: SeamlessNoteEmbedPlugin,
   ) {
     super(app, plugin);
   }

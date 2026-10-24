@@ -1,6 +1,6 @@
 # Seamless Note Embed
 
-An Obsidian plugin that makes embedded notes feel like part of the containing note. It shifts the headings of an embedded note so they nest under the heading that contains the embed, adds those headings to the Outline view, and offers optional appearance controls for the embed itself. The embedded note is never modified.
+Seamless Note Embed makes notes you embed in Obsidian feel like part of the note you are reading. It moves their headings to the right level, adds them to the Outline, and can hide extra embed controls. The embedded note itself is never changed.
 
 ## Features
 
@@ -87,13 +87,13 @@ When the plugin is available in the Obsidian Community directory, install it fro
 Download `main.js`, `manifest.json`, and `styles.css` from the latest GitHub release, then place them in:
 
 ```text
-<vault>/.obsidian/plugins/auto-incremented-embed-headings/
+<vault>/.obsidian/plugins/seamless-note-embed/
 ├── main.js
 ├── manifest.json
 └── styles.css
 ```
 
-Enable **Seamless Note Embed** in **Settings → Community plugins**. The plugin folder keeps its original ID (`auto-incremented-embed-headings`) so existing installations and settings continue to work.
+Enable **Seamless Note Embed** in **Settings → Community plugins**. The plugin folder uses the plugin ID, `seamless-note-embed`.
 
 ### From source
 

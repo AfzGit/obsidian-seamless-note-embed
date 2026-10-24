@@ -90,7 +90,7 @@ Submission checklist:
 9. No telemetry, network requests, dynamic ads, obfuscation, self-updating, or note/source-file writes. The plugin only saves its own settings to `data.json`.
 10. A GitHub release exists with `main.js`, `manifest.json`, and optional `styles.css` as assets.
 11. The release tag matches the manifest version exactly. `.npmrc` sets `tag-version-prefix=""` so `npm version` does not create a `v` prefix.
-12. The plugin ID and display name are stable. The folder ID `auto-incremented-embed-headings` is intentionally kept even though the display name is **Seamless Note Embed**, because changing it would break existing installations and settings.
+12. The plugin ID is `seamless-note-embed` and the display name is **Seamless Note Embed**. Keep both stable so existing installations and settings continue to work.
 
 The initial submission is made through [community.obsidian.md](https://community.obsidian.md). After the plugin is accepted, users download later releases directly from GitHub.
 
@@ -121,7 +121,7 @@ The CI workflow in `.github/workflows/lint.yml` runs `npm ci`, `npm run lint`, `
 1. Build with `npm run build`.
 2. Copy `main.js`, `manifest.json`, and `styles.css` to:
    ```text
-   <vault>/.obsidian/plugins/auto-incremented-embed-headings/
+   <vault>/.obsidian/plugins/seamless-note-embed/
    ```
 3. Enable **Seamless Note Embed** in **Settings → Community plugins**.
 4. Reload the app after changing `main.js` (`Ctrl+P` → **Reload app without saving**), or toggle the plugin off and on.
@@ -130,7 +130,7 @@ Useful console checks:
 
 ```js
 // The plugin instance and settings.
-app.plugins.plugins["auto-incremented-embed-headings"].settings
+app.plugins.plugins["seamless-note-embed"].settings
 
 // The virtual headings exposed to other plugins.
 app.metadataCache.getFileCache(app.workspace.getActiveFile()).headings
