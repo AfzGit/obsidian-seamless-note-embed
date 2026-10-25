@@ -16,23 +16,23 @@
 body.aeih-hide-embed-line .markdown-reading-view .markdown-embed,
 body.aeih-hide-embed-line .markdown-source-view .markdown-embed,
 body[style*="--aeih-print-hide-embed-line:"] .print .markdown-embed {
-  --embed-border-start: none !important;
-  border-inline-start: none !important;
-  border-left: none !important;
+  --embed-border-start: none;
+  border-inline-start: none;
+  border-left: none;
 }
 
 body.aeih-hide-embed-line .markdown-reading-view .markdown-embed-content,
 body.aeih-hide-embed-line .markdown-source-view .markdown-embed-content,
 body[style*="--aeih-print-hide-embed-line:"] .print .markdown-embed-content {
-  border-inline-start: none !important;
-  border-left: none !important;
+  border-inline-start: none;
+  border-left: none;
 }
 
 /* Hide the filename shown above an embedded note. */
 body.aeih-hide-embed-title .markdown-reading-view .markdown-embed-title,
 body.aeih-hide-embed-title .markdown-source-view .markdown-embed-title,
 body[style*="--aeih-print-hide-embed-title:"] .print .markdown-embed-title {
-  display: none !important;
+  display: none;
 }
 
 /*
@@ -50,8 +50,7 @@ body.aeih-hide-embed-scrollbar .markdown-source-view .markdown-embed-content .cm
 body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content,
 body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content .markdown-preview-view,
 body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content .cm-scroller {
-  scrollbar-width: none !important;
-  scrollbar-gutter: auto !important;
+  scrollbar-gutter: auto;
 }
 
 body.aeih-hide-embed-scrollbar .markdown-reading-view .markdown-embed-content::-webkit-scrollbar,
@@ -63,16 +62,16 @@ body.aeih-hide-embed-scrollbar .markdown-source-view .markdown-embed-content .cm
 body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content::-webkit-scrollbar,
 body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content .markdown-preview-view::-webkit-scrollbar,
 body[style*="--aeih-print-hide-embed-scrollbar:"] .print .markdown-embed-content .cm-scroller::-webkit-scrollbar {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* Hide the open-note button in the top-right corner of note embeds. */
 body.aeih-hide-embed-open-button .markdown-reading-view .markdown-embed .markdown-embed-link,
 body.aeih-hide-embed-open-button .markdown-source-view .markdown-embed .markdown-embed-link,
 body[style*="--aeih-print-hide-embed-open-button:"] .print .markdown-embed .markdown-embed-link {
-  display: none !important;
+  display: none;
 }
 
 /*
@@ -85,15 +84,15 @@ body.aeih-remove-embed-limit .markdown-reading-view .markdown-embed-content .mar
 body.aeih-remove-embed-limit .markdown-source-view .markdown-embed-content .markdown-preview-view,
 body[style*="--aeih-print-remove-embed-limit:"] .print .markdown-embed-content,
 body[style*="--aeih-print-remove-embed-limit:"] .print .markdown-embed-content .markdown-preview-view {
-  max-height: none !important;
-  overflow: visible !important;
+  max-height: none;
+  overflow: visible;
 }
 
 body.aeih-remove-embed-limit .markdown-reading-view .markdown-embed-content .markdown-preview-view,
 body.aeih-remove-embed-limit .markdown-source-view .markdown-embed-content .markdown-preview-view,
 body[style*="--aeih-print-remove-embed-limit:"] .print .markdown-embed-content .markdown-preview-view {
-  height: auto !important;
-  scrollbar-gutter: auto !important;
+  height: auto;
+  scrollbar-gutter: auto;
 }
 
 /*
@@ -104,15 +103,15 @@ body[style*="--aeih-print-remove-embed-limit:"] .print .markdown-embed-content .
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed,
 body.aeih-hide-embed-indent .markdown-source-view .markdown-embed,
 body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed {
-  --embed-padding: 0 !important;
-  margin-left: 0 !important;
-  padding-left: 0 !important;
+  --embed-padding: 0;
+  margin-left: 0;
+  padding-left: 0;
 }
 
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content,
 body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content,
 body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content {
-  padding-left: 0 !important;
+  padding-left: 0;
 }
 
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .markdown-preview-view,
@@ -130,10 +129,10 @@ body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .m
 body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .markdown-preview-section,
 body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .el-p,
 body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .el-p p {
-  padding-left: 0 !important;
-  margin-left: 0 !important;
-  border-left: none !important;
-  border-inline-start: none !important;
+  padding-left: 0;
+  margin-left: 0;
+  border-left: none;
+  border-inline-start: none;
 }
 
 body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content,
@@ -142,7 +141,7 @@ body.aeih-hide-embed-indent .markdown-reading-view .markdown-embed-content .show
 body.aeih-hide-embed-indent .markdown-source-view .markdown-embed-content .show-indentation-guide,
 body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content,
 body[style*="--aeih-print-hide-embed-indent:"] .print .markdown-embed-content .show-indentation-guide {
-  --indentation-guide-width: 0 !important;
+  --indentation-guide-width: 0;
 }
 
 /* Justify text in Reading View, including the text of embedded notes. */
@@ -154,5 +153,5 @@ body[style*="--aeih-print-justify-preview:"] .print .markdown-preview-view p,
 body[style*="--aeih-print-justify-preview:"] .print .markdown-preview-view li,
 body[style*="--aeih-print-justify-preview:"] .print .markdown-preview-view td,
 body[style*="--aeih-print-justify-preview:"] .print .markdown-preview-view blockquote {
-  text-align: justify !important;
+  text-align: justify;
 }
