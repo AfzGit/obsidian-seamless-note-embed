@@ -4,6 +4,12 @@
  */
 export const OUTLINE_KEY_ATTRIBUTE = "data-aeih-outline-key";
 
+/**
+ * Synthetic target line used by the filename heading. A real note never has a
+ * negative line number, so this cannot collide with a source heading.
+ */
+export const FILENAME_HEADING_TARGET_LINE = -1;
+
 export interface OutlineKeyParts {
   /** The note whose outline is being shown. */
   rootPath: string;

@@ -1,6 +1,10 @@
 import type { App, EmbedCache, HeadingCache, MarkdownView } from "obsidian";
-import { filterSection, getFileData, resolveEmbedData } from "./embedData";
-import { findMatchingHeading, splitLinktext } from "./embedTargets";
+import { filterSection, getFileData, isHeadingSectionEmbed, resolveEmbedData } from "./embedData";
+import {
+  findMatchingHeading,
+  noteDisplayName,
+  splitLinktext,
+} from "./embedTargets";
 import {
   headingLevelFromClasses,
   headingLevelFromTagName,
@@ -8,10 +12,16 @@ import {
   shiftHeadingLevel,
 } from "./headingMath";
 import { HeadingAtLine, nearestPrecedingHeadingLevel, parseHeadingLines } from "./headingSource";
-import { OUTLINE_KEY_ATTRIBUTE, makeOutlineKey } from "./outlineKeys";
+import {
+  FILENAME_HEADING_TARGET_LINE,
+  OUTLINE_KEY_ATTRIBUTE,
+  makeOutlineKey,
+} from "./outlineKeys";
 
 export const ORIGINAL_LEVEL_ATTRIBUTE = "data-aeih-original-level";
 const SHIFT_ATTRIBUTE = "data-aeih-shift";
+const FILENAME_HEADING_ATTRIBUTE = "data-aeih-filename-heading";
+const FILENAME_HEADING_CLASS = "aeih-filename-heading";
 
 const HEADING_SELECTOR = "h1,h2,h3,h4,h5,h6";
 const EMBED_SELECTOR = ".markdown-embed";
@@ -24,6 +34,8 @@ const TRACKED_SELECTOR = `[${ORIGINAL_LEVEL_ATTRIBUTE}], [${SHIFT_ATTRIBUTE}]`;
 export interface HeadingShiftSettings {
   enabled: boolean;
   livePreview: boolean;
+  /** Add the embedded note's filename as a heading. Requires `enabled`. */
+  filenameAsHeading: boolean;
 }
 
 interface CodeMirrorViewLike {
@@ -341,6 +353,12 @@ export class EmbedHeadingProcessor {
     let embedIndex = 0;
 
     const visit = (node: HTMLElement): void => {
+      if (node.hasAttribute(FILENAME_HEADING_ATTRIBUTE)) {
+        // The filename heading is synthetic: it is not in the target note's
+        // metadata and must not consume a source heading.
+        return;
+      }
+
       if (isMarkdownEmbed(node)) {
         const counted = this.processEmbed(
           node,
@@ -418,6 +436,7 @@ export class EmbedHeadingProcessor {
     let headings: HeadingCache[] | null = null;
     let noteEmbeds: EmbedCache[] = [];
     let counted = false;
+    let hasRenderedSection = false;
     const src = embed.getAttribute("src");
 
     if (src && sourcePath && this.app.metadataCache) {
@@ -429,6 +448,10 @@ export class EmbedHeadingProcessor {
           // links are skipped by the outline builder as well.
           counted = true;
           const section = filterSection(resolved.data, resolved.subpath);
+          hasRenderedSection = isHeadingSectionEmbed(
+            resolved.data,
+            resolved.subpath,
+          );
           sourcePath = resolved.data.path;
           headings = section ? section.headings : [];
           noteEmbeds = section
@@ -450,18 +473,34 @@ export class EmbedHeadingProcessor {
     const sourceLine = counted
       ? this.resolveEmbedSourceLine(embed, parentContext, embedIndex)
       : null;
-    const sourceParentLevel =
-      sourceLine !== null && parentContext.sourceHeadings
-        ? shiftHeadingLevel(
-            nearestPrecedingHeadingLevel(parentContext.sourceHeadings, sourceLine),
-            scopeParentLevel,
-          )
-        : null;
+    let sourceParentLevel: number | null = null;
+    if (sourceLine !== null && parentContext.sourceHeadings) {
+      const nearest = nearestPrecedingHeadingLevel(
+        parentContext.sourceHeadings,
+        sourceLine,
+      );
+      // Level 0 means the embed is not under any heading. Only a nested note's
+      // scope can give it a nonzero parent; do not clamp a true 0 up to 1.
+      sourceParentLevel =
+        nearest === 0 && scopeParentLevel === 0
+          ? 0
+          : shiftHeadingLevel(nearest, scopeParentLevel);
+    }
     const effectiveParentLevel = sourceParentLevel ?? parentLevel;
-    embed.setAttribute(SHIFT_ATTRIBUTE, String(effectiveParentLevel));
+    const filenameAsHeading =
+      this.getSettings().filenameAsHeading &&
+      counted &&
+      hasRenderedSection &&
+      !!sourcePath;
+    // With a filename heading, both the synthetic heading and every heading in
+    // the embedded note move one level deeper than the embed's parent heading.
+    const headingParentLevel = filenameAsHeading
+      ? shiftHeadingLevel(1, effectiveParentLevel)
+      : effectiveParentLevel;
+    embed.setAttribute(SHIFT_ATTRIBUTE, String(headingParentLevel));
 
     const content = directEmbedContent(embed) ?? embed;
-    this.processScope(content, effectiveParentLevel, {
+    const context: HeadingScopeContext = {
       isRoot: false,
       rootPath: parentContext.rootPath,
       sourcePath,
@@ -476,9 +515,128 @@ export class EmbedHeadingProcessor {
         : null,
       noteEmbeds,
       embedCursor: { value: 0 },
-    });
+    };
+
+    this.syncFilenameHeading(
+      content,
+      filenameAsHeading && sourcePath ? noteDisplayName(sourcePath) : null,
+      headingParentLevel,
+      context,
+    );
+    this.processScope(content, headingParentLevel, context);
 
     return counted;
+  }
+
+  /**
+   * Create, update, or remove the synthetic heading that represents the
+   * embedded note's filename. Only direct children of the embed body are
+   * considered, so a nested embed keeps its own filename heading.
+   */
+  private syncFilenameHeading(
+    content: HTMLElement,
+    filename: string | null,
+    level: number,
+    context: HeadingScopeContext,
+  ): void {
+    const body = this.findEmbedBody(content);
+    const existing = Array.from(body.children).filter(
+      (child): child is HTMLElement =>
+        isElement(child) && child.hasAttribute(FILENAME_HEADING_ATTRIBUTE),
+    );
+
+    if (!filename) {
+      for (const heading of existing) {
+        heading.remove();
+      }
+      return;
+    }
+
+    const [first, ...extras] = existing;
+    for (const extra of extras) {
+      extra.remove();
+    }
+
+    let heading: HTMLElement;
+    if (first) {
+      heading = this.replaceHeading(first, level);
+      if (heading.textContent !== filename) {
+        heading.textContent = filename;
+      }
+    } else {
+      heading = this.createFilenameHeading(body, filename, level);
+      this.insertFilenameHeading(body, heading);
+    }
+
+    heading.setAttribute(FILENAME_HEADING_ATTRIBUTE, "true");
+    heading.setAttribute("data-heading", filename);
+    heading.setAttribute("dir", "auto");
+    heading.classList.add(FILENAME_HEADING_CLASS);
+    this.assignFilenameOutlineKey(heading, context);
+  }
+
+  private createFilenameHeading(
+    body: HTMLElement,
+    filename: string,
+    level: number,
+  ): HTMLElement {
+    const win = body.ownerDocument.win as Window & {
+      createEl: (tag: string) => HTMLElement;
+    };
+    const heading = win.createEl(`h${level}`);
+    heading.textContent = filename;
+    return heading;
+  }
+
+  /**
+   * Put the heading at the top of the embed body, after the preview pusher
+   * spacer when one is present. Inserting inside the sizer keeps the heading
+   * aligned with the embedded Markdown instead of the full scroll container.
+   */
+  private insertFilenameHeading(body: HTMLElement, heading: HTMLElement): void {
+    const first = body.firstElementChild;
+    const before =
+      first && first.classList.contains("markdown-preview-pusher")
+        ? first.nextSibling
+        : body.firstChild;
+    body.insertBefore(heading, before);
+  }
+
+  /** Prefer the rendered Markdown body inside an embed so heading CSS applies. */
+  private findEmbedBody(content: HTMLElement): HTMLElement {
+    const children = Array.from(content.children).filter(isElement);
+    const base =
+      children.find((child) =>
+        child.classList.contains("markdown-preview-view"),
+      ) ??
+      children.find((child) => child.classList.contains("markdown-rendered")) ??
+      content;
+    const baseChildren = Array.from(base.children).filter(isElement);
+    return (
+      baseChildren.find((child) =>
+        child.classList.contains("markdown-preview-sizer"),
+      ) ?? base
+    );
+  }
+
+  private assignFilenameOutlineKey(
+    heading: HTMLElement,
+    context: HeadingScopeContext,
+  ): void {
+    if (!context.rootPath || !context.sourcePath) {
+      heading.removeAttribute(OUTLINE_KEY_ATTRIBUTE);
+      return;
+    }
+
+    heading.setAttribute(
+      OUTLINE_KEY_ATTRIBUTE,
+      makeOutlineKey({
+        rootPath: context.rootPath,
+        embedPath: context.embedPath,
+        targetPath: context.sourcePath,
+        targetLine: FILENAME_HEADING_TARGET_LINE,
+      }),
+    );
   }
 
   /**
@@ -987,6 +1145,17 @@ export class EmbedHeadingProcessor {
   }
 
   private restoreWithin(root: HTMLElement): void {
+    const filenameSelector = `[${FILENAME_HEADING_ATTRIBUTE}]`;
+    const filenameHeadings = Array.from(
+      root.querySelectorAll<HTMLElement>(filenameSelector),
+    );
+    if (root.matches(filenameSelector)) {
+      filenameHeadings.push(root);
+    }
+    for (const heading of filenameHeadings) {
+      heading.remove();
+    }
+
     const elements: HTMLElement[] = [];
 
     if (root.matches(TRACKED_SELECTOR)) {

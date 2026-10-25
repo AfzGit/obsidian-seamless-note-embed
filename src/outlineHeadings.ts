@@ -1,8 +1,12 @@
 import type { EmbedCache, HeadingCache } from "obsidian";
-import { filterSection, type EmbedData } from "./embedData";
-import { splitLinktext } from "./embedTargets";
+import { filterSection, isHeadingSectionEmbed, type EmbedData } from "./embedData";
+import { noteDisplayName, splitLinktext } from "./embedTargets";
 import { shiftHeadingLevel } from "./headingMath";
-import { makeOutlineKey, type OutlineEmbedMeta } from "./outlineKeys";
+import {
+  FILENAME_HEADING_TARGET_LINE,
+  makeOutlineKey,
+  type OutlineEmbedMeta,
+} from "./outlineKeys";
 
 /** A heading cache entry, optionally marking a heading contributed by an embed. */
 export interface OutlineHeading extends HeadingCache {
@@ -25,6 +29,12 @@ export interface BuildOutlineOptions {
    * keep their original levels.
    */
   shift?: boolean;
+  /**
+   * Add the embedded note's filename as a heading at `parentLevel + 1` and
+   * shift the note's own headings one level deeper. Only takes effect when
+   * `shift` is true.
+   */
+  filenameAsHeading?: boolean;
 }
 
 interface OutlineEvent {
@@ -91,6 +101,27 @@ function makeChainKey(path: string, subpath: string): string {
   return JSON.stringify([path, subpath]);
 }
 
+function makeSyntheticHeading(
+  text: string,
+  level: number,
+  rootEmbedLine: number,
+  meta: OutlineEmbedMeta,
+): OutlineHeading {
+  return {
+    heading: text,
+    level,
+    position: {
+      // Clicking uses the start line, so navigate to the top-level embed.
+      start: { line: rootEmbedLine, col: 0, offset: 0 },
+      // The core outline's preview-mode "active heading" check uses the end
+      // line. A fake heading must never win that check; the real parent
+      // heading above the embed should stay highlighted instead.
+      end: { line: Number.MAX_SAFE_INTEGER, col: 0, offset: 0 },
+    },
+    aeih: meta,
+  };
+}
+
 /**
  * Build the flat heading list consumed by Obsidian's core Outline view.
  *
@@ -107,6 +138,7 @@ export function buildOutlineHeadings(
   options: BuildOutlineOptions = {},
 ): OutlineHeading[] {
   const shift = options.shift ?? true;
+  const filenameAsHeading = (options.filenameAsHeading ?? false) && shift;
   const output: OutlineHeading[] = [];
   let currentLevel = 0;
   let noteEmbedIndex = 0;
@@ -132,6 +164,7 @@ export function buildOutlineHeadings(
         output,
         resolveFile,
         shift,
+        filenameAsHeading,
       });
 
       // Only resolved note embeds occupy an index in the DOM's embed path.
@@ -161,6 +194,7 @@ interface AppendEmbeddedOptions {
   output: OutlineHeading[];
   resolveFile: ResolveOutlineFile;
   shift: boolean;
+  filenameAsHeading: boolean;
 }
 
 /** Returns true when the target is a note, so it occupies a DOM embed index. */
@@ -176,6 +210,7 @@ function appendEmbeddedHeadings(options: AppendEmbeddedOptions): boolean {
     output,
     resolveFile,
     shift,
+    filenameAsHeading,
   } = options;
 
   const { path, subpath } = splitLinktext(embed.link);
@@ -195,13 +230,43 @@ function appendEmbeddedHeadings(options: AppendEmbeddedOptions): boolean {
   }
 
   let currentLevel = parentLevel;
+  const includeFilename =
+    filenameAsHeading && isHeadingSectionEmbed(target, subpath);
+
+  if (includeFilename) {
+    const filenameLevel = shiftHeadingLevel(1, parentLevel);
+    output.push(
+      makeSyntheticHeading(
+        noteDisplayName(target.path),
+        filenameLevel,
+        rootEmbedLine,
+        {
+          key: makeOutlineKey({
+            rootPath,
+            embedPath,
+            targetPath: target.path,
+            targetLine: FILENAME_HEADING_TARGET_LINE,
+          }),
+          rootPath,
+          embedPath: [...embedPath],
+          targetPath: target.path,
+          targetLine: FILENAME_HEADING_TARGET_LINE,
+          originalLevel: 1,
+          embedLine: rootEmbedLine,
+        },
+      ),
+    );
+    currentLevel = filenameLevel;
+  }
+
+  const headingParentLevel = includeFilename ? parentLevel + 1 : parentLevel;
   let nestedEmbedIndex = 0;
 
   for (const event of mergeEvents(section.headings, section.embeds)) {
     if (event.kind === "heading" && event.heading) {
       const original = event.heading;
       const level = shift
-        ? shiftHeadingLevel(original.level, parentLevel)
+        ? shiftHeadingLevel(original.level, headingParentLevel)
         : original.level;
       const meta: OutlineEmbedMeta = {
         key: makeOutlineKey({
@@ -218,19 +283,9 @@ function appendEmbeddedHeadings(options: AppendEmbeddedOptions): boolean {
         embedLine: rootEmbedLine,
       };
 
-      output.push({
-        heading: original.heading,
-        level,
-        position: {
-          // Clicking uses the start line, so navigate to the top-level embed.
-          start: { line: rootEmbedLine, col: 0, offset: 0 },
-          // The core outline's preview-mode "active heading" check uses the
-          // end line. A fake heading must never win that check; the real
-          // parent heading above the embed should stay highlighted instead.
-          end: { line: Number.MAX_SAFE_INTEGER, col: 0, offset: 0 },
-        },
-        aeih: meta,
-      });
+      output.push(
+        makeSyntheticHeading(original.heading, level, rootEmbedLine, meta),
+      );
 
       currentLevel = level;
       continue;
@@ -248,6 +303,7 @@ function appendEmbeddedHeadings(options: AppendEmbeddedOptions): boolean {
         output,
         resolveFile,
         shift,
+        filenameAsHeading,
       });
 
       if (counted) {

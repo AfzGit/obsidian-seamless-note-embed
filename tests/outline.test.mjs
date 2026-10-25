@@ -19,6 +19,7 @@ globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.windo
 const require = createRequire(import.meta.url);
 const {
   normalizeHeading,
+  noteDisplayName,
   resolveHeadingSubpath,
   splitLinktext,
 } = require("./.tmp/embedTargets.cjs");
@@ -70,6 +71,13 @@ test("splits link paths and heading subpaths", () => {
 test("normalizes headings like Obsidian link resolution", () => {
   assert.equal(normalizeHeading("  **Part 1:**  "), "part 1");
   assert.equal(normalizeHeading("Part 1"), "part 1");
+});
+
+test("derives a filename heading from a note path", () => {
+  assert.equal(noteDisplayName("note.md"), "note");
+  assert.equal(noteDisplayName("folder/My Note.md"), "My Note");
+  assert.equal(noteDisplayName("folder\\My Note.md"), "My Note");
+  assert.equal(noteDisplayName("note"), "note");
 });
 
 test("resolves heading sections, including nested heading paths", () => {
@@ -440,6 +448,218 @@ test("clamps embedded outline levels at six and keeps duplicate embeds distinct"
 
   assert.notEqual(result[1].aeih.key, result[3].aeih.key);
   assert.deepEqual(result[3].aeih.embedPath, [1]);
+});
+
+test("adds a filename heading and shifts embedded headings one level deeper", () => {
+  const files = new Map([
+    [
+      "note.md",
+      {
+        path: "note.md",
+        headings: [heading("H1 Heading", 1, 0), heading("H2 Heading", 2, 2)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const root = {
+    path: "parent.md",
+    headings: [heading("Main H1 Heading", 1, 0)],
+    embeds: [embed("note.md", 1)],
+  };
+
+  const result = buildOutlineHeadings(root, makeResolver(files), {
+    filenameAsHeading: true,
+  });
+  assert.deepEqual(
+    result.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "Main H1 Heading", level: 1 },
+      { text: "note", level: 2 },
+      { text: "H1 Heading", level: 3 },
+      { text: "H2 Heading", level: 4 },
+    ],
+  );
+
+  const filename = result[1];
+  assert.equal(filename.aeih.targetLine, -1);
+  assert.equal(filename.aeih.originalLevel, 1);
+  assert.equal(filename.position.start.line, 1);
+  assert.equal(filename.position.end.line, Number.MAX_SAFE_INTEGER);
+  assert.notEqual(filename.aeih.key, result[2].aeih.key);
+});
+
+test("starts the filename heading at level one when the embed has no parent heading", () => {
+  const files = new Map([
+    [
+      "early.md",
+      {
+        path: "early.md",
+        headings: [heading("early 1", 1, 0), heading("early 2", 2, 2)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const root = {
+    path: "parent.md",
+    headings: [heading("later", 1, 3)],
+    embeds: [embed("early.md", 0)],
+  };
+
+  const result = buildOutlineHeadings(root, makeResolver(files), {
+    filenameAsHeading: true,
+  });
+  assert.deepEqual(
+    result.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "early", level: 1 },
+      { text: "early 1", level: 2 },
+      { text: "early 2", level: 3 },
+      { text: "later", level: 1 },
+    ],
+  );
+});
+
+test("ignores the filename heading option when shifting is disabled", () => {
+  const files = new Map([
+    [
+      "note.md",
+      {
+        path: "note.md",
+        headings: [heading("H1 Heading", 1, 0)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const root = {
+    path: "parent.md",
+    headings: [heading("Parent", 1, 0)],
+    embeds: [embed("note.md", 1)],
+  };
+
+  const result = buildOutlineHeadings(root, makeResolver(files), {
+    shift: false,
+    filenameAsHeading: true,
+  });
+  assert.deepEqual(
+    result.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "Parent", level: 1 },
+      { text: "H1 Heading", level: 1 },
+    ],
+  );
+});
+
+test("adds filename headings to nested embeds at their own depth", () => {
+  const files = new Map([
+    [
+      "apple.md",
+      {
+        path: "apple.md",
+        headings: [heading("apple 1", 1, 0)],
+        embeds: [embed("orange.md", 2)],
+      },
+    ],
+    [
+      "orange.md",
+      {
+        path: "orange.md",
+        headings: [heading("orange 1", 1, 0), heading("orange 2", 2, 2)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const root = {
+    path: "fruits.md",
+    headings: [heading("fruits 1", 1, 0)],
+    embeds: [embed("apple.md", 1)],
+  };
+
+  const result = buildOutlineHeadings(root, makeResolver(files), {
+    filenameAsHeading: true,
+  });
+  assert.deepEqual(
+    result.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "fruits 1", level: 1 },
+      { text: "apple", level: 2 },
+      { text: "apple 1", level: 3 },
+      { text: "orange", level: 4 },
+      { text: "orange 1", level: 5 },
+      { text: "orange 2", level: 6 },
+    ],
+  );
+
+  assert.deepEqual(result[3].aeih.embedPath, [0, 0]);
+  assert.equal(result[3].aeih.targetLine, -1);
+  assert.equal(result[4].aeih.targetLine, 0);
+});
+
+test("adds a filename heading to section embeds", () => {
+  const files = new Map([
+    [
+      "book.md",
+      {
+        path: "book.md",
+        headings: [
+          heading("Part", 1, 0),
+          heading("Chapter", 2, 2),
+          heading("Details", 3, 4),
+          heading("Other", 1, 6),
+        ],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const root = {
+    path: "parent.md",
+    headings: [heading("Parent", 1, 0)],
+    embeds: [embed("book.md#Chapter", 1)],
+  };
+
+  const result = buildOutlineHeadings(root, makeResolver(files), {
+    filenameAsHeading: true,
+  });
+  assert.deepEqual(
+    result.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "Parent", level: 1 },
+      { text: "book", level: 2 },
+      { text: "Chapter", level: 4 },
+      { text: "Details", level: 5 },
+    ],
+  );
+});
+
+test("does not add a filename heading to block embeds", () => {
+  const files = new Map([
+    [
+      "book.md",
+      {
+        path: "book.md",
+        headings: [heading("Chapter", 2, 0)],
+        embeds: [],
+      },
+    ],
+  ]);
+
+  const root = {
+    path: "parent.md",
+    headings: [heading("Parent", 1, 0)],
+    embeds: [embed("book.md#^block", 1)],
+  };
+
+  const result = buildOutlineHeadings(root, makeResolver(files), {
+    filenameAsHeading: true,
+  });
+  assert.deepEqual(
+    result.map((item) => ({ text: item.heading, level: item.level })),
+    [{ text: "Parent", level: 1 }],
+  );
 });
 
 test("patches an outline view and restores it when stopped", () => {

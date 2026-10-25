@@ -34,6 +34,15 @@ export interface LinkParts {
 }
 
 /**
+ * The name shown when an embedded note's filename is used as a heading.
+ * Directories and the `.md` extension are removed.
+ */
+export function noteDisplayName(path: string): string {
+  const basename = path.split(/[\\/]/).pop() ?? path;
+  return basename.replace(/\.md$/i, "");
+}
+
+/**
  * Split `note#Heading|alias` into its file path and subpath.
  *
  * Obsidian's metadata cache normally stores embed links without an alias, but

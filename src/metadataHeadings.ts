@@ -18,6 +18,8 @@ export interface MetadataHeadingSettings {
   enabled: boolean;
   /** Shift embedded heading levels. Defaults to true. */
   shift?: boolean;
+  /** Add the embedded note's filename as a heading. Requires `shift`. */
+  filenameAsHeading?: boolean;
 }
 
 /**
@@ -546,7 +548,10 @@ export class MetadataHeadingIntegration {
             return null;
           }
         },
-        { shift: this.getSettings().shift ?? true },
+        {
+          shift: this.getSettings().shift ?? true,
+          filenameAsHeading: this.getSettings().filenameAsHeading ?? false,
+        },
       );
     } catch (error) {
       console.error(

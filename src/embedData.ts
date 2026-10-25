@@ -58,6 +58,15 @@ export function resolveEmbedData(
 }
 
 /**
+ * Whether an embed renders a note body that can have headings: either a
+ * whole-note embed or a heading-section embed. Block, footnote, and
+ * unresolvable heading embeds render content without a heading hierarchy.
+ */
+export function isHeadingSectionEmbed(data: EmbedData, subpath: string): boolean {
+  return !subpath || resolveHeadingSubpath(data.headings, subpath) !== null;
+}
+
+/**
  * Restrict a target note to the heading section rendered by a section embed.
  *
  * Whole-note embeds return everything. Block and footnote embeds, and

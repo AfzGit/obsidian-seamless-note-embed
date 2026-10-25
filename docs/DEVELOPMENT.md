@@ -142,6 +142,9 @@ document.querySelectorAll("[data-aeih-original-level]")
 
 // Rendered outline keys.
 document.querySelectorAll("[data-aeih-outline-key]")
+
+// Synthetic filename headings.
+document.querySelectorAll("[data-aeih-filename-heading]")
 ```
 
 All plugin errors are logged with the prefix `Seamless Note Embed:`.
@@ -151,6 +154,9 @@ Test at least:
 - Reading View and Live Preview.
 - An embed under a heading, an embed with no preceding heading, and a nested embed.
 - A section embed (`![[note#Heading]]`) and a block embed (`![[note#^block]]`).
+- With **Use the filename as the embed heading** on, confirm that the filename renders at `x + 1` and each embedded heading at `x + 1 + y`. Check an embed under a heading (`x = 1`), an embed before any heading (`x = 0`), a nested embed, and a section embed. Block embeds must not get a filename heading.
+- Turning the filename-heading option off must remove the synthetic heading and restore the normal `x + y` shift. Turning heading shifting off must remove it too.
+- Confirm the filename heading appears in the built-in Outline, Quiet Outline, and Subtle TOC, and that clicking it navigates to the embed.
 - A note containing an image/PDF embed before a note embed, to confirm media embeds do not consume outline indices.
 - The built-in Outline, Quiet Outline, and Subtle TOC.
 - A link to an embedded heading and Another Quick Switcher's header search.
@@ -185,9 +191,13 @@ Some Obsidian methods live on prototypes. Record whether the property was an own
 
 If another plugin wraps a method after this plugin, leave the newer wrapper in place. `restoreAll()` checks that the current value is still this plugin's wrapper before restoring. The metadata wrapper has a similar check and keeps its raw getter registered if another wrapper is on top.
 
+### Synthetic filename headings
+
+The filename heading is not in the target note's metadata. Mark it with `data-aeih-filename-heading`, skip it in `processScope()`, and use `FILENAME_HEADING_TARGET_LINE` (`-1`) for its outline key so it never consumes a source heading or collides with a real line. When inserting or removing it, inspect only direct children of the embed body so nested embeds keep their own filename headings.
+
 ### Settings drift
 
-`display()` and `getSettingDefinitions()` share the same row definitions. When adding a setting, update the `PluginSettings` interface, `DEFAULT_SETTINGS`, and the row list. The declarative path is used on Obsidian 1.13+; the imperative path is used on older versions.
+`display()` and `getSettingDefinitions()` share the same row definitions. When adding a setting, update the `PluginSettings` interface, `DEFAULT_SETTINGS`, and the row list. The declarative path is used on Obsidian 1.13+; the imperative path is used on older versions. Conditional settings use a `disabled` callback, and any toggle that changes another row's disabled state must re-render the tab.
 
 ### Hover previews
 

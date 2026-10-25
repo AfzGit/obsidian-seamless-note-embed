@@ -110,7 +110,11 @@ export class OutlineIntegration {
 
   constructor(
     private readonly app: App,
-    private readonly getSettings: () => { enabled: boolean; shift?: boolean },
+    private readonly getSettings: () => {
+      enabled: boolean;
+      shift?: boolean;
+      filenameAsHeading?: boolean;
+    },
   ) {
     this.scroller = new HeadingScroller(app);
   }
@@ -392,7 +396,10 @@ export class OutlineIntegration {
               return null;
             }
           },
-          { shift: this.getSettings().shift ?? true },
+          {
+            shift: this.getSettings().shift ?? true,
+            filenameAsHeading: this.getSettings().filenameAsHeading ?? false,
+          },
         );
 
         for (const heading of combined) {

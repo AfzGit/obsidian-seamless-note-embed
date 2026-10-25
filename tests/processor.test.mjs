@@ -66,6 +66,50 @@ function cacheEmbed(link, line, col = 0) {
   };
 }
 
+/**
+ * Build an app whose metadata cache knows the rendered root note and any
+ * embedded notes. The root note is always `fruits.md`, matching the outline
+ * key assertions used below.
+ */
+function makeCachedApp(root, rootCache, files) {
+  const rootFile = { path: "fruits.md", extension: "md" };
+  const fileByPath = new Map();
+  const cacheByPath = new Map([[rootFile.path, rootCache]]);
+  for (const [path, cache] of Object.entries(files)) {
+    fileByPath.set(path, { path, extension: "md" });
+    cacheByPath.set(path, cache);
+  }
+
+  const view = {
+    file: rootFile,
+    getViewType: () => "markdown",
+    containerEl: root,
+  };
+
+  return {
+    workspace: {
+      activeLeaf: null,
+      iterateAllLeaves(callback) {
+        callback({ view });
+      },
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) => fileByPath.get(path) ?? null,
+    },
+  };
+}
+
+function filenameSettings(overrides = {}) {
+  return { enabled: true, livePreview: true, filenameAsHeading: true, ...overrides };
+}
+
+function outlineKeys(container) {
+  return Array.from(container.querySelectorAll("[data-aeih-outline-key]")).map(
+    (heading) => JSON.parse(heading.getAttribute("data-aeih-outline-key")),
+  );
+}
+
 test("shifts headings by the parent heading level", () => {
   setDocument(`
     <div class="markdown-preview-view">
@@ -249,6 +293,371 @@ test("chains shifts through nested embeds", () => {
     { level: 4, text: "nested" },
     { level: 5, text: "nested sub" },
   ]);
+
+  processor.destroy();
+});
+
+test("adds the filename as a heading and shifts embedded headings below it", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <h1>Main H1 Heading</h1>
+      <div class="markdown-embed" src="note.md">
+        <div class="markdown-embed-content">
+          <h1>H1 Heading</h1>
+          <h2>H2 Heading</h2>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeCachedApp(
+    root,
+    {
+      headings: [cacheHeading("Main H1 Heading", 1, 0)],
+      embeds: [cacheEmbed("note.md", 1)],
+    },
+    {
+      "note.md": {
+        headings: [cacheHeading("H1 Heading", 1, 0), cacheHeading("H2 Heading", 2, 2)],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "Main H1 Heading" },
+    { level: 2, text: "note" },
+    { level: 3, text: "H1 Heading" },
+    { level: 4, text: "H2 Heading" },
+  ]);
+
+  const filename = root.querySelector("[data-aeih-filename-heading]");
+  assert.ok(filename);
+  assert.equal(filename.textContent, "note");
+  assert.equal(filename.tagName, "H2");
+  assert.equal(filename.parentElement.classList.contains("markdown-embed-content"), true);
+
+  // The synthetic heading must not consume a source heading, so the outline
+  // key uses the reserved line sentinel.
+  assert.deepEqual(outlineKeys(root), [
+    ["fruits.md", [0], "note.md", -1],
+    ["fruits.md", [0], "note.md", 0],
+    ["fruits.md", [0], "note.md", 2],
+  ]);
+
+  processor.destroy();
+});
+
+test("inserts the filename heading inside the embed preview sizer", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <h1>Parent</h1>
+      <div class="markdown-embed" src="note.md">
+        <div class="markdown-embed-content">
+          <div class="markdown-preview-view markdown-rendered">
+            <div class="markdown-preview-sizer">
+              <div class="markdown-preview-pusher"></div>
+              <div class="markdown-preview-section">
+                <h1>H1 Heading</h1>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeCachedApp(
+    root,
+    {
+      headings: [cacheHeading("Parent", 1, 0)],
+      embeds: [cacheEmbed("note.md", 1)],
+    },
+    {
+      "note.md": {
+        headings: [cacheHeading("H1 Heading", 1, 0)],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  processor.refresh(root);
+
+  const filename = root.querySelector("[data-aeih-filename-heading]");
+  assert.ok(filename);
+  assert.equal(
+    filename.parentElement.classList.contains("markdown-preview-sizer"),
+    true,
+  );
+  assert.equal(
+    filename.previousElementSibling.classList.contains("markdown-preview-pusher"),
+    true,
+  );
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "Parent" },
+    { level: 2, text: "note" },
+    { level: 3, text: "H1 Heading" },
+  ]);
+
+  processor.destroy();
+});
+
+test("adds the filename heading at h1 when the embed has no parent heading", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <div class="markdown-embed" src="early.md">
+        <div class="markdown-embed-content">
+          <h1>early 1</h1>
+          <h2>early 2</h2>
+        </div>
+      </div>
+      <h1>later</h1>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeCachedApp(
+    root,
+    {
+      headings: [cacheHeading("later", 1, 3)],
+      embeds: [cacheEmbed("early.md", 0)],
+    },
+    {
+      "early.md": {
+        headings: [cacheHeading("early 1", 1, 0), cacheHeading("early 2", 2, 2)],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "early" },
+    { level: 2, text: "early 1" },
+    { level: 3, text: "early 2" },
+    { level: 1, text: "later" },
+  ]);
+
+  processor.destroy();
+});
+
+test("keeps a single filename heading across refreshes", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <h1>Parent</h1>
+      <div class="markdown-embed" src="note.md">
+        <div class="markdown-embed-content">
+          <h1>H1 Heading</h1>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeCachedApp(
+    root,
+    {
+      headings: [cacheHeading("Parent", 1, 0)],
+      embeds: [cacheEmbed("note.md", 1)],
+    },
+    {
+      "note.md": {
+        headings: [cacheHeading("H1 Heading", 1, 0)],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  processor.refresh(root);
+  processor.refresh(root);
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "Parent" },
+    { level: 2, text: "note" },
+    { level: 3, text: "H1 Heading" },
+  ]);
+  assert.equal(root.querySelectorAll("[data-aeih-filename-heading]").length, 1);
+
+  processor.destroy();
+});
+
+test("removes the filename heading when the option is turned off", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <h1>Parent</h1>
+      <div class="markdown-embed" src="note.md">
+        <div class="markdown-embed-content">
+          <h1>H1 Heading</h1>
+          <h2>H2 Heading</h2>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeCachedApp(
+    root,
+    {
+      headings: [cacheHeading("Parent", 1, 0)],
+      embeds: [cacheEmbed("note.md", 1)],
+    },
+    {
+      "note.md": {
+        headings: [cacheHeading("H1 Heading", 1, 0), cacheHeading("H2 Heading", 2, 2)],
+        embeds: [],
+      },
+    },
+  );
+
+  const currentSettings = filenameSettings();
+  const processor = makeProcessor(app, currentSettings);
+  processor.refresh(root);
+  assert.equal(root.querySelectorAll("[data-aeih-filename-heading]").length, 1);
+
+  currentSettings.filenameAsHeading = false;
+  processor.refresh(root);
+
+  assert.equal(root.querySelectorAll("[data-aeih-filename-heading]").length, 0);
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "Parent" },
+    { level: 2, text: "H1 Heading" },
+    { level: 3, text: "H2 Heading" },
+  ]);
+
+  processor.destroy();
+});
+
+test("adds a separate filename heading to a nested embed", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <h1>fruits 1</h1>
+      <div class="markdown-embed" src="apple.md">
+        <div class="markdown-embed-content">
+          <h1>apple 1</h1>
+          <div class="markdown-embed" src="orange.md">
+            <div class="markdown-embed-content">
+              <h1>orange 1</h1>
+              <h2>orange 2</h2>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeCachedApp(
+    root,
+    {
+      headings: [cacheHeading("fruits 1", 1, 0)],
+      embeds: [cacheEmbed("apple.md", 1)],
+    },
+    {
+      "apple.md": {
+        headings: [cacheHeading("apple 1", 1, 0)],
+        embeds: [cacheEmbed("orange.md", 2)],
+      },
+      "orange.md": {
+        headings: [cacheHeading("orange 1", 1, 0), cacheHeading("orange 2", 2, 2)],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "fruits 1" },
+    { level: 2, text: "apple" },
+    { level: 3, text: "apple 1" },
+    { level: 4, text: "orange" },
+    { level: 5, text: "orange 1" },
+    { level: 6, text: "orange 2" },
+  ]);
+
+  // Each embed owns exactly one filename heading; the nested one is not
+  // reparented into the outer embed.
+  const filenames = Array.from(
+    root.querySelectorAll("[data-aeih-filename-heading]"),
+  );
+  assert.deepEqual(
+    filenames.map((heading) => heading.textContent),
+    ["apple", "orange"],
+  );
+  assert.deepEqual(
+    filenames.map((heading) => heading.parentElement.closest(".markdown-embed").getAttribute("src")),
+    ["apple.md", "orange.md"],
+  );
+
+  processor.destroy();
+});
+
+test("adds a filename heading to section embeds but not block embeds", () => {
+  setDocument(`
+    <div class="markdown-preview-view">
+      <h1>Parent</h1>
+      <div class="markdown-embed" src="book.md#Chapter">
+        <div class="markdown-embed-content">
+          <h2>Chapter</h2>
+          <h3>Details</h3>
+        </div>
+      </div>
+      <div class="markdown-embed" src="book.md#^block">
+        <div class="markdown-embed-content">
+          <p>block text</p>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeCachedApp(
+    root,
+    {
+      headings: [cacheHeading("Parent", 1, 0)],
+      embeds: [cacheEmbed("book.md#Chapter", 1), cacheEmbed("book.md#^block", 3)],
+    },
+    {
+      "book.md": {
+        headings: [
+          cacheHeading("Part", 1, 0),
+          cacheHeading("Chapter", 2, 2),
+          cacheHeading("Details", 3, 4),
+          cacheHeading("Other", 1, 6),
+        ],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  processor.refresh(root);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "Parent" },
+    { level: 2, text: "book" },
+    { level: 4, text: "Chapter" },
+    { level: 5, text: "Details" },
+  ]);
+
+  const filenames = Array.from(
+    root.querySelectorAll("[data-aeih-filename-heading]"),
+  );
+  assert.deepEqual(
+    filenames.map((heading) => heading.textContent),
+    ["book"],
+  );
 
   processor.destroy();
 });

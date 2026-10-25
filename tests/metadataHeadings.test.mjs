@@ -143,6 +143,74 @@ test("exposes shifted embedded headings through the metadata cache", () => {
   assert.equal(app.metadataCache.getFileCache(rootFile).headings.length, 2);
 });
 
+test("exposes a filename heading through the metadata cache", () => {
+  const { rootFile, rootHeadings, app } = makeFixture();
+  const integration = new MetadataHeadingIntegration(app, () => ({
+    enabled: true,
+    filenameAsHeading: true,
+  }));
+
+  integration.start();
+
+  const cache = app.metadataCache.getFileCache(rootFile);
+  assert.deepEqual(
+    cache.headings.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "fruits 1", level: 1 },
+      { text: "apple", level: 2 },
+      { text: "apple 1", level: 3 },
+      { text: "apple 2", level: 4 },
+      { text: "fruits 2", level: 2 },
+    ],
+  );
+
+  // Real headings stay identical so the core outline can still match them.
+  assert.equal(cache.headings[0], rootHeadings[0]);
+  assert.equal(cache.headings[4], rootHeadings[1]);
+
+  const filename = cache.headings[1];
+  assert.equal(filename.aeih.targetLine, -1);
+  assert.equal(filename.aeih.originalLevel, 1);
+  assert.ok(filename.position.start.offset >= 2 ** 40);
+
+  const bySubpath = integration.resolveVirtualSubpath(rootFile, "#apple");
+  assert.ok(bySubpath);
+  assert.equal(bySubpath.meta.key, filename.aeih.key);
+  assert.equal(bySubpath.meta.targetLine, -1);
+
+  // Internal reads still bypass the virtual headings.
+  const raw = getFileData(app, rootFile);
+  assert.equal(raw.headings.length, 2);
+
+  integration.stop();
+  integration.destroy();
+});
+
+test("does not expose a filename heading when heading shifting is disabled", () => {
+  const { rootFile, app } = makeFixture();
+  const integration = new MetadataHeadingIntegration(app, () => ({
+    enabled: true,
+    shift: false,
+    filenameAsHeading: true,
+  }));
+
+  integration.start();
+
+  const cache = app.metadataCache.getFileCache(rootFile);
+  assert.deepEqual(
+    cache.headings.map((item) => ({ text: item.heading, level: item.level })),
+    [
+      { text: "fruits 1", level: 1 },
+      { text: "apple 1", level: 1 },
+      { text: "apple 2", level: 2 },
+      { text: "fruits 2", level: 2 },
+    ],
+  );
+
+  integration.stop();
+  integration.destroy();
+});
+
 test("exposes unshifted embedded headings when heading shifting is disabled", () => {
   const { rootFile, app } = makeFixture();
   const integration = new MetadataHeadingIntegration(app, () => ({

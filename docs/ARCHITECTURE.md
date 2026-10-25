@@ -5,7 +5,7 @@ This document explains how Seamless Note Embed works, which Obsidian internals i
 ## Invariants
 
 1. **Never write to notes or source files.** The plugin changes rendered DOM, in-memory metadata, and in-memory outline state. Its only disk write is the usual plugin settings file, `data.json`.
-2. **Never modify the embedded note.** Heading levels are changed by replacing rendered heading elements, not by editing Markdown.
+2. **Never modify the embedded note.** Heading levels are changed by replacing rendered heading elements, and the optional filename heading is a synthetic DOM element, not Markdown.
 3. **Do not double-count embeds.** Every internal read of Obsidian's metadata cache goes through the raw-cache registry, not through the wrapped public method.
 4. **Be reversible.** Every monkey-patch records enough ownership information to restore the original property or delete an own property that the plugin added.
 5. **Prefer graceful degradation.** If an internal API is missing or throws, the plugin should leave that integration alone and keep heading shifting working.
@@ -44,7 +44,7 @@ The navigation bridge is removed before the metadata wrapper so no patched navig
 | `src/processor.ts` | Rendered DOM heading shifting for Reading View and Live Preview. |
 | `src/headingMath.ts` | Pure heading-level helpers and class/tag detection. |
 | `src/headingSource.ts` | Source-line heading parser used by Live Preview. |
-| `src/embedData.ts` | Raw metadata access, embed resolution, section filtering. |
+| `src/embedData.ts` | Raw metadata access, embed resolution, section filtering, and heading-section detection. |
 | `src/embedTargets.ts` | Pure link/subpath parsing, heading normalization, matching, section ranges. |
 | `src/outlineHeadings.ts` | Builds the flat synthetic heading list for outlines. |
 | `src/outlineKeys.ts` | Stable outline keys and metadata shape. |
@@ -101,6 +101,15 @@ Live Preview is different because:
 | `data-aeih-original-level` | Original source level of an embedded heading. Its presence means the element is tracked and must be restored. |
 | `data-aeih-shift` | Effective shift amount. Used for cleanup even when the original level is not available. |
 | `data-aeih-outline-key` | Stable key connecting a rendered heading to an outline entry. |
+| `data-aeih-filename-heading` | Marks the synthetic heading that represents the embedded note's filename. Removed on restore. |
+
+### Filename heading
+
+When `pluginEnabled && enabled && filenameAsHeading` are all on, each note embed that renders a heading section gets a synthetic heading for its filename. The synthetic heading is `h(x + 1)`, and the note's own headings shift to `h(x + 1 + y)` instead of `h(x + y)`, where `x` is the effective parent level (0 when the embed is above every heading) and `y` is the source heading level.
+
+`syncFilenameHeading()` only inspects the embed's own body: the preview sizer when present, otherwise `.markdown-preview-view`, `.markdown-rendered`, or the content element. It marks its result with `data-aeih-filename-heading`. Direct-child scoping is what keeps a nested embed's filename heading independent from its parent embed's. When a preview pusher exists, the heading is inserted after it so scroll offsets stay stable. The text comes from `noteDisplayName(target.path)`: the basename without the `.md` extension.
+
+The synthetic heading uses the reserved outline target line `FILENAME_HEADING_TARGET_LINE` (`-1`), so it can never collide with a source heading. `processScope()` skips elements with `data-aeih-filename-heading`; otherwise the fake heading would consume a source heading cursor slot. `restoreWithin()` removes these elements, so turning the option or heading shifting off restores the original DOM. Block and footnote embeds, and unresolvable section links, do not get a filename heading because they do not render a heading hierarchy (`isHeadingSectionEmbed()`).
 
 ### Mutation handling
 
@@ -117,7 +126,8 @@ For each note embed:
 1. Resolve the link path and subpath.
 2. Stop cycles by keeping a chain of `(path, subpath)` keys.
 3. Filter the target to the section rendered by a section embed.
-4. Recursively append the target's headings and nested embeds.
+4. If `filenameAsHeading` is on and the embed renders a heading section, emit the filename at `parentLevel + 1` and shift the note's own headings one level deeper. Block and footnote embeds are skipped.
+5. Recursively append the target's headings and nested embeds.
 
 Each synthetic heading is an `OutlineHeading`, which extends Obsidian's `HeadingCache` with an optional `aeih` metadata object:
 
@@ -142,6 +152,8 @@ Synthetic headings point at the top-level embed's line:
 - `position.start.line` is the embed line so the core Outline can navigate to the embed.
 - `position.end.line` is `Number.MAX_SAFE_INTEGER` so the core Outline's preview-mode active-heading check does not select a fake heading. The real parent heading above the embed should stay highlighted.
 
+A filename heading has `targetLine = -1` in its `aeih` metadata and key, which distinguishes it from every real heading in the target note.
+
 The core Outline compares headings by object identity in some paths. `buildOutlineHeadings()` therefore keeps real heading objects unchanged instead of cloning them.
 
 ## Virtual metadata cache
@@ -150,7 +162,7 @@ Quiet Outline, Subtle TOC, and other plugins read headings from `metadataCache.g
 
 ### Raw-cache registry
 
-The wrapper calls the original bound getter, then returns a shallow copy of the cache with `headings` replaced by the combined list. The plugin's own code must never read the wrapped method, or an embed would be counted twice. `src/rawMetadata.ts` stores the original getter in a `WeakMap<App, RawFileCacheGetter>`. `getRawFileCache()` always uses that getter when available. The heading-shifting switch is passed to `buildOutlineHeadings()` as `shift`; when it is off, the wrapper still adds embedded headings but leaves their levels unchanged.
+The wrapper calls the original bound getter, then returns a shallow copy of the cache with `headings` replaced by the combined list. The plugin's own code must never read the wrapped method, or an embed would be counted twice. `src/rawMetadata.ts` stores the original getter in a `WeakMap<App, RawFileCacheGetter>`. `getRawFileCache()` always uses that getter when available. The heading-shifting switch is passed to `buildOutlineHeadings()` as `shift`; when it is off, the wrapper still adds embedded headings but leaves their levels unchanged. `filenameAsHeading` is passed separately and is ignored while `shift` is false.
 
 ### Cache fingerprint
 
@@ -276,7 +288,7 @@ Plugin ID: `subtle-toc`.
 - `display()` renders `Setting` objects into the tab for Obsidian < 1.13.
 - `getSettingDefinitions()` returns declarative definitions for Obsidian 1.13+, which also makes settings searchable.
 
-Toggles call `saveSettings()` and then either `reapplySettings()` (heading shifting or the master switch) or `applyAppearanceSettings()` (CSS-only options). The refresh button calls `refreshHeadingLevels()`. The **Toggle plugin on/off** command flips `pluginEnabled`; **Toggle heading increments on/off** flips `enabled`.
+Toggles call `saveSettings()` and then either `reapplySettings()` (heading shifting or the master switch) or `applyAppearanceSettings()` (CSS-only options). The refresh button calls `refreshHeadingLevels()`. The **Toggle plugin on/off** command flips `pluginEnabled`; **Toggle heading increments on/off** flips `enabled`. The filename-heading toggle is disabled while heading shifting is off, and changing the heading-shifting toggle re-renders the tab so that disabled state follows.
 
 `src/main.ts` maps each appearance option to a body class and a print flag:
 
@@ -316,7 +328,8 @@ The tests bundle selected TypeScript modules with esbuild into `tests/.tmp` and 
 - heading level math and source parsing
 - embed link/subpath resolution
 - Reading View and Live Preview DOM shifting
-- section and nested embeds
+- section, block, and nested embeds
+- filename headings in the DOM, outline, and metadata cache
 - outline heading order and keys
 - virtual metadata positions and navigation
 - built-in Outline patching

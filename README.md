@@ -5,6 +5,7 @@ Seamless Note Embed makes notes you embed in Obsidian feel like part of the note
 ## Features
 
 - Shift embedded headings to match the heading hierarchy of the containing note.
+- Optionally show an embedded note's filename as a heading, with the note's own headings nested one level below it.
 - Support nested embeds, section embeds such as `![[note#Heading]]`, and headings on the same line as the embed.
 - Show embedded headings in Obsidian's built-in **Outline** view, at their shifted levels or their original levels when heading shifting is off.
 - Expose embedded headings to metadata-cache-based outline and search plugins, including **Quiet Outline**, **Subtle TOC**, and **Another Quick Switcher**'s header search.
@@ -60,6 +61,26 @@ With this plugin, the embed is treated as part of the parent heading's section:
 
 In other words, every heading inside an embed is shifted by the level of the nearest heading above the embed in the containing note. An embed with no heading above it is left at its original levels. Nested embeds are cumulative as you go deeper.
 
+### Filename as heading
+
+Heading shifting can also treat each embedded note's filename as the embed's top heading. Turn on **Use the filename as the embed heading** in settings. The filename is rendered at `x + 1`, and each heading in the embedded note moves to `x + 1 + y`, where `x` is the level of the heading above the embed (0 when there is none) and `y` is that heading's original level.
+
+For the example above, `fruits.md` then renders as:
+
+```markdown
+# fruits 1
+## apple
+### apple 1
+#### apple 2
+##### apple 3
+## fruits 2
+### orange
+#### orange 1
+##### orange 2
+```
+
+The folder path and `.md` extension are removed from the displayed name, so `notes/apple.md` becomes `apple`. The option is only available while heading level shifting is enabled. Block embeds do not get a filename heading, and all levels still clamp at `h6`.
+
 ## Outline and navigation
 
 Running **Outline: Show outline** shows the note's own headings and the headings contributed by its embeds, indented under the correct parent.
@@ -108,6 +129,7 @@ Copy the generated `main.js`, `manifest.json`, and `styles.css` into the plugin 
 
 - **Enable plugin features** — master switch for heading shifting, outline entries, navigation, and appearance changes. Turning it off restores normal Obsidian behavior.
 - **Enable heading level shifting** — turns heading level shifting on or off. Embedded headings stay in the Outline and other outline plugins, but keep their original levels when this is off.
+- **Use the filename as the embed heading** — show each embedded note's filename as a heading one level below the heading that contains the embed, and shift the note's own headings one level deeper. Only available while **Enable heading level shifting** is on.
 - **Apply in live preview** — also shift embeds while editing. Reading view is always supported while heading shifting is enabled.
 - **Refresh now** — re-apply shifts to every open note.
 
@@ -137,7 +159,7 @@ The line, indentation, filename, scrollbar, open-note button, and height-limit r
 
 1. After Obsidian renders a note (or an embed), the plugin finds the top-level rendered note that contains it.
 2. It walks the rendered document in order, tracking the nearest heading level.
-3. When it reaches an embed, it renames the rendered `<h1>`–`<h6>` elements inside that embed to their shifted levels.
+3. When it reaches an embed, it renames the rendered `<h1>`–`<h6>` elements inside that embed to their shifted levels. If the filename-heading option is on, it first inserts a synthetic heading for the filename.
 4. The original heading level is remembered in a DOM attribute so repeated renders are idempotent. The plugin restores the original levels when it is disabled or unloaded.
 
 For the Outline view, the plugin builds the same hierarchy from Obsidian's metadata cache: the note's own headings plus the headings of each embedded note, shifted recursively. It then augments the core Outline view's heading list. The Outline's existing rendering, search, folding, and navigation are reused; no separate sidebar is added.
@@ -159,7 +181,8 @@ In Live Preview, the parent note's headings are CodeMirror lines rather than `<h
 - Exposing virtual headings through the metadata cache means other plugins that read headings can see embedded headings too. This is intentional for outline and search support, but it may affect plugins that treat every cached heading as a real heading in the parent note. Plugins that bypass the bridged navigation APIs may stop at the embed line.
 - Outline entries are rebuilt from the metadata cache, so newly typed headings and embeds appear after Obsidian updates its cache.
 - Clicking an embedded outline entry jumps to the embed. Exact scrolling to the heading requires that heading to be rendered; in a long, virtualized Live Preview note it may not be available until scrolled into view.
-- Block embeds do not contribute headings to the outline. Section embeds and nested embeds are supported.
+- Block embeds do not contribute headings to the outline and do not get a filename heading. Section embeds and nested embeds are supported.
+- With the filename-heading option on, each supported embed contributes one extra synthetic heading. The displayed name drops the folder path and `.md` extension, and the synthetic heading is not written to the note or its metadata cache source.
 - Reading View is fully supported, including when Obsidian virtualizes a parent heading out of the DOM; the plugin reads the preview renderer's source sections in that case. Live Preview uses Obsidian's internal CodeMirror view to map an embed to its source line; if that is unavailable it falls back to the visible heading lines. The fallback can be less accurate in very long, virtualized notes.
 - Heading links inside an embedded note still point at the original note's headings; the plugin does not rewrite links.
 

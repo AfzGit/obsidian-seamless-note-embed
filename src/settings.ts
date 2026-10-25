@@ -11,6 +11,7 @@ export interface PluginSettings {
   pluginEnabled: boolean;
   enabled: boolean;
   livePreview: boolean;
+  filenameAsHeading: boolean;
   hideEmbedLine: boolean;
   hideEmbedIndent: boolean;
   hideEmbedTitle: boolean;
@@ -24,6 +25,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   pluginEnabled: true,
   enabled: true,
   livePreview: true,
+  filenameAsHeading: false,
   hideEmbedLine: false,
   hideEmbedIndent: false,
   hideEmbedTitle: false,
@@ -110,7 +112,17 @@ export class SeamlessNoteEmbedSettingTab extends PluginSettingTab {
         "Enable heading level shifting",
         "Shift the headings of embedded notes so they nest under the heading that contains the embed.",
         "enabled",
+        () => {
+          this.plugin.reapplySettings();
+          this.refreshSettingState();
+        },
+      ),
+      this.toggleRow(
+        "Use the filename as the embed heading",
+        "Show the embedded note's filename as a heading one level below the heading that contains the embed, and shift the note's own headings one level deeper. Only available while heading level shifting is enabled.",
+        "filenameAsHeading",
         () => this.plugin.reapplySettings(),
+        () => !this.plugin.settings.enabled,
       ),
       this.toggleRow(
         "Apply in live preview",
@@ -184,21 +196,44 @@ export class SeamlessNoteEmbedSettingTab extends PluginSettingTab {
     desc: string,
     key: BooleanSettingKey,
     afterChange: () => void,
+    disabled?: () => boolean,
   ): SettingRow {
     return {
       name,
       desc,
       addControl: (setting) => {
-        setting.addToggle((toggle) =>
+        setting.addToggle((toggle) => {
           toggle
             .setValue(this.plugin.settings[key])
             .onChange(async (value) => {
               this.plugin.settings[key] = value;
               await this.plugin.saveSettings();
               afterChange();
-            }),
-        );
+            });
+
+          if (disabled) {
+            toggle.setDisabled(disabled());
+          }
+        });
       },
     };
+  }
+
+  /**
+   * Re-render so a conditional toggle's disabled state follows the
+   * heading-shifting switch. Obsidian 1.13+ uses update(); older versions
+   * only have display(), which is accessed through a cast so the deprecated
+   * static type does not produce a lint warning.
+   */
+  private refreshSettingState(): void {
+    const tab = this as unknown as {
+      update?: () => void;
+      display?: () => void;
+    };
+    if (typeof tab.update === "function") {
+      tab.update();
+    } else {
+      tab.display?.();
+    }
   }
 }

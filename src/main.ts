@@ -56,6 +56,7 @@ export default class SeamlessNoteEmbedPlugin extends Plugin {
     this.metadataHeadings = new MetadataHeadingIntegration(this.app, () => ({
       enabled: this.settings.pluginEnabled,
       shift: this.settings.enabled,
+      filenameAsHeading: this.filenameHeadingEnabled,
     }));
     this.metadataHeadings.start();
 
@@ -70,10 +71,12 @@ export default class SeamlessNoteEmbedPlugin extends Plugin {
     this.processor = new EmbedHeadingProcessor(this.app, () => ({
       enabled: this.headingShiftingEnabled,
       livePreview: this.livePreviewEnabled,
+      filenameAsHeading: this.filenameHeadingEnabled,
     }));
     this.outline = new OutlineIntegration(this.app, () => ({
       enabled: this.settings.pluginEnabled,
       shift: this.settings.enabled,
+      filenameAsHeading: this.filenameHeadingEnabled,
     }));
     if (this.settings.pluginEnabled) {
       this.outline.start();
@@ -251,6 +254,11 @@ export default class SeamlessNoteEmbedPlugin extends Plugin {
 
   get livePreviewEnabled(): boolean {
     return this.headingShiftingEnabled && this.settings.livePreview;
+  }
+
+  /** The filename heading is an extension of heading level shifting. */
+  get filenameHeadingEnabled(): boolean {
+    return this.headingShiftingEnabled && this.settings.filenameAsHeading;
   }
 
   async togglePlugin(): Promise<void> {
