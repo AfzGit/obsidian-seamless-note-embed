@@ -1,6 +1,11 @@
 # Seamless Note Embed
 
-Seamless Note Embed makes notes you embed in Obsidian feel like part of the note you are reading. It moves their headings to the right level, adds them to the Outline, and can hide extra embed controls. The embedded note itself is never changed.
+Seamless Note Embed makes notes you embed in Obsidian feel like part of the note you are reading. It moves their headings to the right level, adds them to the Outline, and can hide extra embed controls. The embedded note itself is never changed. You can easily create PDF books, especially with [obsidian-better-export-pdf v2](https://github.com/l1xnan/obsidian-better-export-pdf) which it was designed to work with.
+
+| Default | With Plugin |
+|---------|-------------|
+| <img width="400" alt="Default" src="https://github.com/user-attachments/assets/1bc1ee5d-95bf-4022-a450-cc6cc7c0ef68" /> | <img width="400" alt="With Plugin" src="https://github.com/user-attachments/assets/e1af9b2a-aac8-44fa-807a-f21ad1a99832" /> |
+
 
 ## Features
 
