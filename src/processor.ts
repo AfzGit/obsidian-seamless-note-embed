@@ -1,4 +1,11 @@
-import type { App, EmbedCache, HeadingCache, MarkdownView } from "obsidian";
+import type {
+  App,
+  EmbedCache,
+  HeadingCache,
+  MarkdownView,
+  TAbstractFile,
+  TFile,
+} from "obsidian";
 import { filterSection, getFileData, isHeadingSectionEmbed, resolveEmbedData } from "./embedData";
 import {
   findMatchingHeading,
@@ -22,6 +29,13 @@ export const ORIGINAL_LEVEL_ATTRIBUTE = "data-aeih-original-level";
 const SHIFT_ATTRIBUTE = "data-aeih-shift";
 const FILENAME_HEADING_ATTRIBUTE = "data-aeih-filename-heading";
 const FILENAME_HEADING_CLASS = "aeih-filename-heading";
+
+/**
+ * Better Export PDF renders a document title as `<h1 class="__title__">`
+ * before the note body. It is not part of the note's heading hierarchy, so it
+ * must not become the parent level of the first embed.
+ */
+const EXPORT_TITLE_CLASS = "__title__";
 
 const HEADING_SELECTOR = "h1,h2,h3,h4,h5,h6";
 const EMBED_SELECTOR = ".markdown-embed";
@@ -103,6 +117,20 @@ function isMarkdownEmbed(element: HTMLElement): boolean {
   return element.classList.contains("markdown-embed");
 }
 
+/** The synthetic document title added by Better Export PDF, not a note heading. */
+function isExportTitle(element: HTMLElement): boolean {
+  return element.classList.contains(EXPORT_TITLE_CLASS);
+}
+
+/**
+ * Narrow an abstract vault entry to a file. TFolder has no `extension`
+ * property, so this is equivalent to `instanceof TFile` without needing the
+ * Obsidian runtime class (which is unavailable in unit tests).
+ */
+function isFileEntry(file: TAbstractFile | null): file is TFile {
+  return !!file && "extension" in file;
+}
+
 /**
  * Walk ancestors and return the outermost element with the requested class.
  * An embedded note may contain its own `.markdown-preview-view` element, so
@@ -145,6 +173,24 @@ export function findRenderRoot(element: HTMLElement): HTMLElement | null {
   return null;
 }
 
+/**
+ * Find a detached print root that contains `element`, if any.
+ *
+ * Better Export PDF renders into `.print` outside every workspace leaf. It
+ * reads heading anchors and builds PDF bookmarks synchronously right after
+ * `MarkdownRenderer.postProcess` resolves, before the next animation frame.
+ * Print roots therefore have to be processed immediately. This also covers
+ * elements inside an embed, where `findRenderRoot()` deliberately returns null
+ * so the parent note stays the coordinate system.
+ */
+export function findPrintRoot(element: HTMLElement): HTMLElement | null {
+  if (!element.closest(".print") || element.closest(".workspace-leaf")) {
+    return null;
+  }
+
+  return outermostWithClass(element, "markdown-preview-view");
+}
+
 function directEmbedContent(embed: HTMLElement): HTMLElement | null {
   for (const child of Array.from(embed.children)) {
     if (isElement(child) && child.classList.contains("markdown-embed-content")) {
@@ -162,6 +208,12 @@ function directEmbedContent(embed: HTMLElement): HTMLElement | null {
 export class EmbedHeadingProcessor {
   private readonly observers = new Map<HTMLElement, MutationObserver>();
   private readonly frames = new Map<HTMLElement, number>();
+  /**
+   * Source path for roots that are not inside a workspace leaf. Better Export
+   * PDF renders a detached print root, so `findMarkdownView()` cannot find its
+   * file; the post-processor context supplies the path instead.
+   */
+  private readonly sourcePaths = new Map<HTMLElement, string>();
   private destroyed = false;
 
   constructor(
@@ -169,7 +221,7 @@ export class EmbedHeadingProcessor {
     private readonly getSettings: () => HeadingShiftSettings,
   ) {}
 
-  schedule(root: HTMLElement): void {
+  schedule(root: HTMLElement, sourcePath?: string, immediate = false): void {
     if (this.destroyed) {
       return;
     }
@@ -179,7 +231,23 @@ export class EmbedHeadingProcessor {
       return;
     }
 
+    if (sourcePath) {
+      this.sourcePaths.set(root, sourcePath);
+    }
+
     this.ensureObserver(root);
+
+    // Exporters such as Better Export PDF read the rendered headings
+    // synchronously after post-processing, so a print root cannot wait for the
+    // next animation frame.
+    if (immediate) {
+      try {
+        this.refresh(root);
+      } catch (error) {
+        console.error("Seamless Note Embed: failed to update a note", error);
+      }
+      return;
+    }
 
     if (this.frames.has(root)) {
       return;
@@ -196,7 +264,7 @@ export class EmbedHeadingProcessor {
     this.frames.set(root, frame);
   }
 
-  refresh(root: HTMLElement): void {
+  refresh(root: HTMLElement, sourcePath?: string): void {
     if (this.destroyed) {
       return;
     }
@@ -204,6 +272,10 @@ export class EmbedHeadingProcessor {
     if (!root.isConnected) {
       this.disconnectRoot(root);
       return;
+    }
+
+    if (sourcePath) {
+      this.sourcePaths.set(root, sourcePath);
     }
 
     const settings = this.getSettings();
@@ -309,6 +381,7 @@ export class EmbedHeadingProcessor {
       window.cancelAnimationFrame(frame);
     }
     this.frames.clear();
+    this.sourcePaths.clear();
 
     for (const observer of this.observers.values()) {
       observer.disconnect();
@@ -318,7 +391,10 @@ export class EmbedHeadingProcessor {
 
   private processReadingView(root: HTMLElement): void {
     const view = this.findMarkdownView(root);
-    const rootFile = view?.file;
+    // A detached print root (Better Export PDF) has no MarkdownView. Use the
+    // path supplied by the markdown post-processor so embeds can still be
+    // resolved and filename headings can still be created.
+    const rootFile = view?.file ?? this.findFileByPath(this.sourcePaths.get(root));
     const rootPath = rootFile?.path ?? null;
     const fileData = rootFile ? getFileData(this.app, rootFile) : null;
 
@@ -329,13 +405,27 @@ export class EmbedHeadingProcessor {
       embedPath: [],
       headings: null,
       cursor: { value: 0 },
-      sourceHeadings: this.getReadingViewSourceHeadings(view),
+      sourceHeadings: this.getReadingViewSourceHeadings(view, rootFile),
       noteEmbeds: fileData
         ? this.getNoteEmbeds(fileData.path, fileData.embeds)
         : [],
       embedCursor: { value: 0 },
       embedLines: this.getReadingViewEmbedLines(root, view),
     });
+  }
+
+  /** Resolve a post-processor source path to a markdown file. */
+  private findFileByPath(path: string | undefined): TFile | null {
+    if (!path || !this.app.vault) {
+      return null;
+    }
+
+    try {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return isFileEntry(file) ? file : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -375,6 +465,18 @@ export class EmbedHeadingProcessor {
 
       const tagLevel = headingLevelFromTagName(node.tagName);
       if (tagLevel !== null) {
+        if (isExportTitle(node)) {
+          // Better Export PDF's document title is not part of the note's
+          // heading hierarchy. Visit its children, but do not let it become
+          // the parent level of the first embed.
+          for (const child of Array.from(node.children)) {
+            if (isElement(child)) {
+              visit(child);
+            }
+          }
+          return;
+        }
+
         const storedLevel = this.readStoredLevel(node);
         const originalLevel = storedLevel ?? tagLevel;
         let container = node;
@@ -646,6 +748,7 @@ export class EmbedHeadingProcessor {
    */
   private getReadingViewSourceHeadings(
     view: MarkdownView | null,
+    file: TFile | null,
   ): HeadingAtLine[] | null {
     const renderer = this.getPreviewRenderer(view);
     const sections = renderer?.sections;
@@ -669,7 +772,6 @@ export class EmbedHeadingProcessor {
       }
     }
 
-    const file = view?.file;
     if (!file) {
       return null;
     }
@@ -940,7 +1042,7 @@ export class EmbedHeadingProcessor {
         currentLevel = lineLevel;
       } else {
         const tagLevel = headingLevelFromTagName(node.tagName);
-        if (tagLevel !== null) {
+        if (tagLevel !== null && !isExportTitle(node)) {
           currentLevel = tagLevel;
         }
       }
@@ -1261,6 +1363,8 @@ export class EmbedHeadingProcessor {
       window.cancelAnimationFrame(frame);
       this.frames.delete(root);
     }
+
+    this.sourcePaths.delete(root);
   }
 
   private pruneDisconnectedRoots(): void {
@@ -1277,6 +1381,8 @@ export class EmbedHeadingProcessor {
         window.cancelAnimationFrame(frame);
         this.frames.delete(root);
       }
+
+      this.sourcePaths.delete(root);
     }
   }
 }

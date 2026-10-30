@@ -17,7 +17,7 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 
 const require = createRequire(import.meta.url);
-const { EmbedHeadingProcessor, findRenderRoot } = require("./.tmp/processor.cjs");
+const { EmbedHeadingProcessor, findPrintRoot, findRenderRoot } = require("./.tmp/processor.cjs");
 
 const settings = { enabled: true, livePreview: true };
 
@@ -92,6 +92,34 @@ function makeCachedApp(root, rootCache, files) {
       iterateAllLeaves(callback) {
         callback({ view });
       },
+    },
+    metadataCache: {
+      getFileCache: (file) => cacheByPath.get(file.path) ?? null,
+      getFirstLinkpathDest: (path) => fileByPath.get(path) ?? null,
+    },
+  };
+}
+
+/**
+ * Build an app for a detached render root, such as Better Export PDF's print
+ * document. There is no MarkdownView, so the root file is resolved from the
+ * vault by the source path passed to the processor.
+ */
+function makeDetachedApp(rootPath, rootCache, files) {
+  const fileByPath = new Map([[rootPath, { path: rootPath, extension: "md" }]]);
+  const cacheByPath = new Map([[rootPath, rootCache]]);
+  for (const [path, cache] of Object.entries(files)) {
+    fileByPath.set(path, { path, extension: "md" });
+    cacheByPath.set(path, cache);
+  }
+
+  return {
+    workspace: {
+      activeLeaf: null,
+      iterateAllLeaves() {},
+    },
+    vault: {
+      getAbstractFileByPath: (path) => fileByPath.get(path) ?? null,
     },
     metadataCache: {
       getFileCache: (file) => cacheByPath.get(file.path) ?? null,
@@ -447,6 +475,213 @@ test("adds the filename heading at h1 when the embed has no parent heading", () 
   ]);
 
   processor.destroy();
+});
+
+test("processes a detached Better Export PDF root using the post-processor source path", () => {
+  setDocument(`
+    <div class="print">
+      <div class="markdown-preview-view markdown-rendered">
+        <h1 class="__title__">test</h1>
+        <div class="markdown-embed" src="embed.md">
+          <div class="markdown-embed-content">
+            <h1>h1</h1>
+            <h1>h1</h1>
+            <h2>h2</h2>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeDetachedApp(
+    "test.md",
+    { headings: [], embeds: [cacheEmbed("embed.md", 0)] },
+    {
+      "embed.md": {
+        headings: [
+          cacheHeading("h1", 1, 0),
+          cacheHeading("h1", 1, 2),
+          cacheHeading("h2", 2, 4),
+        ],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  processor.refresh(root, "test.md");
+
+  // The export title is not a note heading: the embed has no parent heading,
+  // so its filename heading is h1 and its own headings move one level down.
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "test" },
+    { level: 1, text: "embed" },
+    { level: 2, text: "h1" },
+    { level: 2, text: "h1" },
+    { level: 3, text: "h2" },
+  ]);
+
+  const filename = root.querySelector("[data-aeih-filename-heading]");
+  assert.ok(filename);
+  assert.equal(filename.textContent, "embed");
+  assert.equal(filename.tagName, "H1");
+  assert.equal(
+    filename.parentElement.classList.contains("markdown-embed-content"),
+    true,
+  );
+
+  processor.destroy();
+});
+
+test("ignores a hidden Better Export PDF title when shifting embeds", () => {
+  setDocument(`
+    <div class="print">
+      <div class="markdown-preview-view markdown-rendered">
+        <h1 class="__title__" style="display: none;">test</h1>
+        <div class="markdown-embed" src="embed.md">
+          <div class="markdown-embed-content">
+            <h1>h1</h1>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeDetachedApp(
+    "test.md",
+    { headings: [], embeds: [cacheEmbed("embed.md", 0)] },
+    {
+      "embed.md": {
+        headings: [cacheHeading("h1", 1, 0)],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, settings);
+  processor.refresh(root, "test.md");
+
+  // A hidden title must not shift the embed, even though it is still in the
+  // print DOM. Without the fix this heading would become h2.
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "test" },
+    { level: 1, text: "h1" },
+  ]);
+  assert.equal(root.querySelector("[data-aeih-filename-heading]"), null);
+
+  processor.destroy();
+});
+
+test("schedule forwards the source path for a detached export root", async () => {
+  setDocument(`
+    <div class="print">
+      <div class="markdown-preview-view markdown-rendered">
+        <h1 class="__title__">test</h1>
+        <div class="markdown-embed" src="embed.md">
+          <div class="markdown-embed-content">
+            <h1>h1</h1>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeDetachedApp(
+    "test.md",
+    { headings: [], embeds: [cacheEmbed("embed.md", 0)] },
+    {
+      "embed.md": {
+        headings: [cacheHeading("h1", 1, 0)],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  processor.schedule(root, "test.md");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "test" },
+    { level: 1, text: "embed" },
+    { level: 2, text: "h1" },
+  ]);
+
+  processor.destroy();
+});
+
+test("schedule processes a print root synchronously for the exporter", () => {
+  setDocument(`
+    <div class="print">
+      <div class="markdown-preview-view markdown-rendered">
+        <h1 class="__title__">test</h1>
+        <div class="markdown-embed" src="embed.md">
+          <div class="markdown-embed-content">
+            <h1>h1</h1>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const root = document.querySelector(".markdown-preview-view");
+  const app = makeDetachedApp(
+    "test.md",
+    { headings: [], embeds: [cacheEmbed("embed.md", 0)] },
+    {
+      "embed.md": {
+        headings: [cacheHeading("h1", 1, 0)],
+        embeds: [],
+      },
+    },
+  );
+
+  const processor = makeProcessor(app, filenameSettings());
+  // No await: exporters read the DOM right after post-processing.
+  processor.schedule(root, "test.md", true);
+
+  assert.deepEqual(headingLevels(root), [
+    { level: 1, text: "test" },
+    { level: 1, text: "embed" },
+    { level: 2, text: "h1" },
+  ]);
+
+  processor.destroy();
+});
+
+test("findPrintRoot resolves an embed back to the detached print root", () => {
+  setDocument(`
+    <div class="print">
+      <div id="print-root" class="markdown-preview-view markdown-rendered">
+        <h1 class="__title__">test</h1>
+        <div class="markdown-embed" src="embed.md">
+          <div class="markdown-embed-content">
+            <h1 id="embed-heading">h1</h1>
+          </div>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const embedHeading = document.querySelector("#embed-heading");
+  assert.equal(findPrintRoot(embedHeading).id, "print-root");
+});
+
+test("findPrintRoot ignores previews inside a workspace leaf", () => {
+  setDocument(`
+    <div class="workspace-leaf">
+      <div class="print">
+        <div id="leaf-preview" class="markdown-preview-view markdown-rendered">
+          <h1 id="leaf-heading">note</h1>
+        </div>
+      </div>
+    </div>
+  `);
+
+  assert.equal(findPrintRoot(document.querySelector("#leaf-heading")), null);
 });
 
 test("keeps a single filename heading across refreshes", () => {

@@ -18,6 +18,7 @@ Seamless Note Embed makes notes you embed in Obsidian feel like part of the note
 - Optionally hide the embed line, indentation, filename, scrollbar, and open-note button.
 - Optionally remove the embed height limit or justify reading-view text.
 - Carry the appearance options into PDFs created with **Export to PDF**.
+- Keep the PDF bookmarks created by **Better Export PDF** aligned with the Obsidian outline, including embedded and filename headings.
 - Work in both Reading View and Live Preview.
 - No note files are written to, and the plugin makes no network requests.
 
@@ -91,6 +92,14 @@ The folder path and `.md` extension are removed from the displayed name, so `not
 Running **Outline: Show outline** shows the note's own headings and the headings contributed by its embeds, indented under the correct parent.
 
 Clicking an embedded heading in the outline navigates to the embed. Once the note is rendered, the plugin also scrolls to the exact shifted heading. Section embeds such as `![[note#Heading]]` work as expected; block embeds (`![[note#^block]]`) do not add headings.
+
+### PDF export
+
+[Better Export PDF](https://github.com/l1xnan/obsidian-better-export-pdf) builds its PDF bookmarks from the rendered heading tags. The plugin applies its heading shifts and filename headings to the export's render tree as well, so the PDF outline matches the Obsidian outline.
+
+Exporters read headings synchronously right after Markdown post-processing, so the plugin processes print roots immediately instead of waiting for the next animation frame. Without that, the PDF body would look right while its bookmarks were built from the unshifted DOM.
+
+Better Export PDF can also add the note's filename as a title (**Include file name as title**). The plugin treats that title as a document title, not as a heading in the note, so it does not shift embedded headings or push them under the title bookmark. The title itself still appears as a top-level bookmark.
 
 ### Third-party outline plugins
 

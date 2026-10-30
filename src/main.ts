@@ -2,7 +2,7 @@ import { Notice, Plugin } from "obsidian";
 import { MetadataHeadingIntegration } from "./metadataHeadings";
 import { HeadingNavigationBridge } from "./navigationBridge";
 import { OutlineIntegration } from "./outline";
-import { EmbedHeadingProcessor, findRenderRoot } from "./processor";
+import { EmbedHeadingProcessor, findPrintRoot, findRenderRoot } from "./processor";
 import { ThirdPartyOutlineIntegration } from "./thirdPartyOutlines";
 import {
   SeamlessNoteEmbedSettingTab,
@@ -91,14 +91,27 @@ export default class SeamlessNoteEmbedPlugin extends Plugin {
       this.thirdPartyOutlines.start();
     }
 
-    this.registerMarkdownPostProcessor((element) => {
+    this.registerMarkdownPostProcessor((element, context) => {
       if (!this.headingShiftingEnabled) {
         return;
       }
 
-      const root = findRenderRoot(element);
+      // Print roots (Better Export PDF, Obsidian's print window) are read
+      // synchronously by the exporter, so they must be processed immediately.
+      // For elements inside an embed, findRenderRoot() returns null to keep
+      // the parent note as the coordinate system; findPrintRoot() recovers the
+      // print root so the embed is processed before the exporter reads it.
+      const printRoot = findPrintRoot(element);
+      const root = printRoot ?? findRenderRoot(element);
       if (root) {
-        this.processor.schedule(root);
+        // A detached render root has no MarkdownView, so pass the source path
+        // from the post-processor context. For normal views, findMarkdownView()
+        // remains authoritative.
+        this.processor.schedule(
+          root,
+          element === root ? context.sourcePath : undefined,
+          printRoot !== null,
+        );
       }
     });
 

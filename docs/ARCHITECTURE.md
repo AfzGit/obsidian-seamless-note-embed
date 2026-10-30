@@ -82,6 +82,14 @@ When it finds an `<h1>`–`<h6>`:
 
 `replaceHeading()` creates a new element, copies every attribute (including namespaced attributes), moves all children, and calls `replaceWith()`. Children are moved rather than cloned so event listeners on child nodes survive.
 
+### Detached print roots
+
+Better Export PDF renders the note into a detached `.markdown-preview-view` (inside `.print`) and calls `MarkdownRenderer.postProcess` with the note's `sourcePath`. That root is not inside a workspace leaf, so `findMarkdownView()` cannot find its file. The markdown post-processor passes `context.sourcePath` to `schedule()`/`refresh()`, and `findFileByPath()` resolves it through the vault. This lets embeds resolve and filename headings render in the export DOM.
+
+Print roots must be processed **synchronously**. Exporters add heading anchors and build bookmarks immediately after `postProcess` resolves, before the next animation frame, so `findPrintRoot()` detects `.print` roots outside workspace leaves and `schedule(..., immediate)` runs `refresh()` inline. Normal views keep the coalesced `requestAnimationFrame` path. `findPrintRoot()` also recovers the print root for elements inside an embed, where `findRenderRoot()` intentionally returns null to keep the parent note as the coordinate system.
+
+Better Export PDF also inserts `<h1 class="__title__">` before the note when **Include file name as title** is on, and leaves it in the DOM with `display: none` when it is off. `processScope()` skips that element when tracking `currentLevel`, because it is a document title, not a note heading. Otherwise every embed in the PDF would be shifted one level too deep and would nest under the title bookmark.
+
 ### Live Preview
 
 Live Preview is different because:

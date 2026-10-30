@@ -162,6 +162,7 @@ Test at least:
 - A link to an embedded heading and Another Quick Switcher's header search.
 - Hover previews with appearance settings enabled.
 - PDF export with appearance settings enabled.
+- PDF export with Better Export PDF, with **Include file name as title** both on and off. The outline should match the Obsidian outline plus the optional title bookmark, and embedded filename headings should be present.
 - Disabling heading increments: headings must return to their original levels, while the built-in Outline and third-party outlines still show the embedded headings.
 - Disabling the plugin: headings must return to their original levels and appearance classes must be removed.
 
@@ -206,6 +207,10 @@ Appearance selectors are scoped to `.markdown-reading-view` and `.markdown-sourc
 ### PDF export
 
 Obsidian's print window receives inline custom properties from the body but not arbitrary body classes. Keep the `--aeih-print-*` flags and the `body[style*="--aeih-print-...:"] .print` selectors in `styles.css` in sync with `APPEARANCE_OPTIONS` in `main.ts`.
+
+Better Export PDF renders into a detached `.markdown-preview-view`, so `findMarkdownView()` returns null there. The markdown post-processor's `context.sourcePath` is the only way to resolve the root note; pass it to `schedule()`/`refresh()`. Its `<h1 class="__title__">` is a document title, not a note heading, and must stay out of `currentLevel`.
+
+Print roots must be processed synchronously. Exporters add heading anchors and build bookmarks immediately after `MarkdownRenderer.postProcess` resolves, before the next animation frame, so `findPrintRoot()` detects `.print` roots outside workspace leaves and `schedule(root, sourcePath, true)` runs `refresh()` inline. Normal views keep the coalesced `requestAnimationFrame` path. `findPrintRoot()` also recovers the print root for elements inside an embed, where `findRenderRoot()` intentionally returns null to keep the parent note as the coordinate system. If you change the post-processor wiring, verify that the PDF outline (not just the body) reflects the shifts.
 
 ### jsdom tests
 
