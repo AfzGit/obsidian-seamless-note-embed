@@ -1,6 +1,6 @@
 {
   "name": "seamless-note-embed",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "description": "Obsidian plugin that shifts embedded-note headings, integrates them into the built-in Outline view, and adds optional embed appearance controls.",
   "main": "main.js",
   "scripts": {
