@@ -1,6 +1,6 @@
 # Seamless Note Embed
 
-Seamless Note Embed makes notes you embed in Obsidian feel like part of the note you are reading. It moves their headings to the right level, adds them to the Outline, and can hide extra embed controls. The embedded note itself is never changed. You can easily create PDF books, especially with [obsidian-better-export-pdf v2](https://github.com/l1xnan/obsidian-better-export-pdf) which it was designed to work with.
+Seamless Note Embed makes notes you embed in Obsidian feel like part of the note you are reading. It moves their headings to the right level, adds them to the Outline, and can hide extra embed controls. The embedded note itself is never changed. The outline produced is compatible and readable by [obsidian-better-export-pdf (v2)](https://github.com/l1xnan/obsidian-better-export-pdf), [obsidian-automatic-table-of-contents](https://github.com/johansatge/obsidian-automatic-table-of-contents), [obsidian-another-quick-switcher](https://github.com/tadashi-aikawa/obsidian-another-quick-switcher), and potentially other plugins as well.
 
 | Default | With Plugin |
 |---------|-------------|
@@ -24,45 +24,50 @@ Seamless Note Embed makes notes you embed in Obsidian feel like part of the note
 
 ## The problem
 
-Given `apple.md`:
+Given `apple.md` and `orange.md`:
 
 ```markdown
-# apple 1
-## apple 2
-### apple 3
+# H1 apple
+## H2 apple
+### H3 apple
+```
+
+```markdown
+# H1 orange
+## H2 orange
 ```
 
 and `fruits.md`:
 
 ```markdown
-# fruits 1
+# H1 fruits
 ![[apple.md]]
-## fruits 2
+## H2 fruits
 ![[orange.md]]
 ```
 
 Obsidian normally renders the embedded headings at their original levels:
 
 ```markdown
-# fruits 1
-# apple 1
-## apple 2
-### apple 3
-## fruits 2
-# orange 1
-## orange 2
+# H1 fruits
+# H1 apple
+## H2 apple
+### H3 apple
+## H2 fruits
+# H1 orange
+## H2 orange
 ```
 
 With this plugin, the embed is treated as part of the parent heading's section:
 
 ```markdown
-# fruits 1
-## apple 1
-### apple 2
-#### apple 3
-## fruits 2
-### orange 1
-#### orange 2
+# H1 fruits
+## H1 apple
+### H2 apple
+#### H3 apple
+## H2 fruits
+### H1 orange
+#### H2 orange
 ```
 
 In other words, every heading inside an embed is shifted by the level of the nearest heading above the embed in the containing note. An embed with no heading above it is left at its original levels. Nested embeds are cumulative as you go deeper.
