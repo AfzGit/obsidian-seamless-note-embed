@@ -41,8 +41,11 @@ and `fruits.md`:
 
 ```markdown
 # H1 fruits
+
 ![[apple.md]]
+
 ## H2 fruits
+
 ![[orange.md]]
 ```
 
@@ -50,10 +53,13 @@ Obsidian normally renders the embedded headings at their original levels:
 
 ```markdown
 # H1 fruits
+
 # H1 apple
 ## H2 apple
 ### H3 apple
+
 ## H2 fruits
+
 # H1 orange
 ## H2 orange
 ```
@@ -62,10 +68,13 @@ With this plugin, the embed is treated as part of the parent heading's section:
 
 ```markdown
 # H1 fruits
+
 ## H1 apple
 ### H2 apple
 #### H3 apple
+
 ## H2 fruits
+
 ### H1 orange
 #### H2 orange
 ```
